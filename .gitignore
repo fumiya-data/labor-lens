@@ -1,0 +1,28 @@
+# Rust
+/target/
+
+# Node / frontend tooling
+/node_modules/
+/dist/
+/build/
+
+# Python helpers
+/.venv/
+/__pycache__/
+*.pyc
+
+# Local runtime data
+/.laborlens/
+/data/local/
+*.sqlite
+*.sqlite3
+*.db
+
+# Generated reports and temporary outputs
+/reports/generated/
+/tmp/
+/temp/
+
+# Editor / OS
+.DS_Store
+Thumbs.db
