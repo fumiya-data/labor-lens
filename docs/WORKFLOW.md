@@ -72,17 +72,17 @@ flowchart TD
 | 順序 | 工程 | 主な成果物 | 状態 | 完了条件 |
 | --- | --- | --- | --- | --- |
 | 1 | 要求定義 | [`REQUIREMENTS.md`](REQUIREMENTS.md) | 作成済み | 何を作るか、何を満たすべきか、何をしないかが固定されている。 |
-| 2 | 用語定義 | [`GLOSSARY.md`](GLOSSARY.md) | 未作成 | `RunId`、issue、粒度、抑制、公開用出力、原本 CSV などの意味が定義されている。 |
-| 3 | 業務ルール定義 | [`BUSINESS-RULES.md`](BUSINESS-RULES.md) | 未作成 | 打刻漏れ、時刻逆転、少人数部署抑制、結合不可などの判定条件が分離されている。 |
-| 4 | 受け入れ基準 | [`ACCEPTANCE-CRITERIA.md`](ACCEPTANCE-CRITERIA.md) | 未作成 | 要求 ID と検証可能な完成条件が対応している。 |
-| 5 | 外部設計 | [`EXTERNAL-DESIGN.md`](EXTERNAL-DESIGN.md) | 未作成 | 画面、レポート、操作フロー、入出力、利用者への見せ方が決まっている。 |
-| 6 | データ設計 | [`DATA-DESIGN.md`](DATA-DESIGN.md) | 未作成 | CSV、正規化データ、ローカル DB、成果物 JSON/CSV の構造が定義されている。 |
+| 2 | 用語定義 | [`GLOSSARY.md`](GLOSSARY.md) | 初版作成済み | `RunId`、issue、粒度、抑制、公開用出力、原本 CSV などの意味が定義されている。 |
+| 3 | 業務ルール定義 | [`BUSINESS-RULES.md`](BUSINESS-RULES.md) | 初版作成済み | 打刻漏れ、時刻逆転、少人数部署抑制、結合不可などの判定条件が分離されている。 |
+| 4 | 受け入れ基準 | [`ACCEPTANCE-CRITERIA.md`](ACCEPTANCE-CRITERIA.md) | 初版作成済み | 要求 ID と検証可能な完成条件が対応している。 |
+| 5 | 外部設計 | [`EXTERNAL-DESIGN.md`](EXTERNAL-DESIGN.md) | 初版作成済み | 画面、レポート、操作フロー、入出力、利用者への見せ方が決まっている。 |
+| 6 | データ設計 | [`DATA-DESIGN.md`](DATA-DESIGN.md) | 初版作成済み | CSV、正規化データ、ローカル DB、成果物 JSON/CSV の構造が定義されている。 |
 | 7 | アーキテクチャ設計 | [`REPOSITORY-PLAN.md`](REPOSITORY-PLAN.md) / [`ARCHITECTURE.md`](ARCHITECTURE.md) | 一部作成済み | ローカルサーバー、DB、ジョブ、UI、ガイド AI の責務分担が決まっている。 |
 | 8 | 詳細設計 | [`DETAILED-DESIGN.md`](DETAILED-DESIGN.md) | 未作成 | crate、module、API、job、型、エラー、設定の構造が決まっている。 |
-| 9 | テスト設計 | [`TEST-PLAN.md`](TEST-PLAN.md) | 未作成 | 受け入れ基準、業務ルール、境界条件、性能、安全境界の検証方法が定義されている。 |
+| 9 | テスト設計 | [`TEST-PLAN.md`](TEST-PLAN.md) | 初版作成済み | 受け入れ基準、業務ルール、境界条件、性能、安全境界の検証方法が定義されている。 |
 | 10 | 実装 | [`IMPLEMENTATION-PLAN.md`](IMPLEMENTATION-PLAN.md) | 未作成 | 実装順序、依存関係、リスク、レビュー単位が決まっている。 |
 | 11 | 検証 | [`VERIFICATION-REPORT.md`](VERIFICATION-REPORT.md) | 未作成 | 要求、設計、テスト結果、未解決事項の対応関係が確認されている。 |
-| 12 | 運用設計 | [`OPERATIONS.md`](OPERATIONS.md) | 未作成 | 起動、停止、ログ、バックアップ、障害時対応、データ保護方針が定義されている。 |
+| 12 | 運用設計 | [`OPERATIONS.md`](OPERATIONS.md) | 初版作成済み | 起動、停止、ログ、バックアップ、障害時対応、データ保護方針が定義されている。 |
 
 ## 文書ごとの責務
 

@@ -49,13 +49,14 @@ Related:
 | JSON フィールド | `snake_case` | `run_id`, `generated_at` |
 | CSV ヘッダー | `snake_case` | `issue_code`, `readiness_status` |
 | enum 値 | 小文字 `snake_case` | `employee_daily`, `not_joinable` |
-| ID 文字列 | 接頭辞 + ULID または UUID | `run_01HX...`, `src_01HX...` |
+| ID 文字列 | 接頭辞 + ULID または UUIDv7 | `run_01HX...`, `src_01HX...` |
 
 ### 2.2 共通 ID
 
 | ID | 型 | 形式 | 用途 |
 | --- | --- | --- | --- |
-| `run_id` | string | `run_` + ULID 推奨 | 実行単位 |
+| `run_id` | string | `run_` + ULID または UUIDv7 推奨 | 実行単位。時系列ソート可能な一意 ID |
+| `tenant_id` | string | `tenant_` + ULID または UUIDv7 推奨 | 顧客、組織、利用環境の分離単位 |
 | `source_file_id` | string | `src_` + ULID 推奨 | 取り込まれた CSV ファイル単位 |
 | `dataset_id` | string | `ds_` + ULID 推奨 | 同一種別・同一実行内の論理データセット |
 | `artifact_id` | string | `art_` + ULID 推奨 | 出力成果物単位 |
@@ -157,14 +158,102 @@ flowchart LR
 
 - 原本 CSV は読み取り専用として保存し、正規化や修正を原本へ書き戻さない。
 - 文字コード、区切り文字、ヘッダー有無は自動検出してよいが、検出結果を記録する。
-- 列名の別名許容範囲は `column_aliases` として管理し、どの原本列がどの標準列へ対応したかを保存する。
+- 入力 CSV の正規化後列名は標準列名のみとする。
+- 別名は、明示的に登録された `column_aliases` だけを許可する。
+- 未登録の別名、標準列名に対応しない列名は警告付きで保持するが処理には使わない。複数の標準列へ解決される曖昧な列名は原則エラーとする。
+- 必須列の欠落、同名重複列、同一標準列に複数列が対応する場合、型変換不能はエラーとする。
+- 列名の別名許容範囲は `column_aliases` としてバージョン管理し、どの原本列がどの標準列へ対応したかを保存する。
+- 列名照合前の機械的正規化として、前後空白除去、全半角正規化、連続空白の単一空白化を行う。英字は `case-insensitive` として照合する。
+- 部分一致、類似度、表記ゆれ推定、LLM 推定による列名解決は禁止する。
 - 行番号はヘッダー行を除いたデータ行番号ではなく、原則として原本ファイル上の 1 始まり行番号を `source_row_number` として保存する。
 - パースできない行は捨てず、`raw_csv_rows` と `issues` に保存する。
 - 自動補正した値は、原本値、正規化値、補正理由を分離して保存する。
 
 ## 5. 入力 CSV 列定義
 
-以下の列名は標準形である。実際の入力 CSV では別名を許容してよいが、別名マッピングは DB に保存する。
+以下の列名は標準形である。実際の入力 CSV では、明示的に登録された別名だけを許容する。別名マッピングは DB に保存し、バージョン管理する。
+
+### 5.0 CSV 列名と別名ポリシー
+
+| 項目 | 決定 |
+| --- | --- |
+| 内部列名 | 標準列名のみ |
+| 正規化後の列名 | 標準列名のみ |
+| 正規化 | 入力列名を標準列名へ解決し、正規化後データでは標準列名と標準型だけを使う |
+| 別名 | 入力 CSV の列名としてだけ許容する。内部列名としては使わない |
+| 別名許可 | 入力プロファイルごとに明示的に登録されたものだけ許可 |
+| 未登録別名 | 標準列へ解決せず、未知列として警告付きで保持するが、処理には使わない |
+| 曖昧な別名 | 原則エラー |
+| 必須列欠落 | エラー |
+| 同名重複列 | エラー |
+| 同一標準列に複数列が対応 | エラー |
+| 別名辞書 | バージョン管理する |
+| 照合前正規化 | 前後空白除去、全半角正規化、連続空白の単一空白化、英字は `case-insensitive` |
+| 未知列 | 警告付きで保持するが、処理には使わない |
+| 推測マッピング | 禁止 |
+
+CSV 列名解決ルール:
+
+| ルール | 内容 |
+| --- | --- |
+| 内部列名 | 内部処理、正規化テーブル、成果物 JSON では標準列名だけを唯一の内部列名として使う |
+| 正規化 | 入力列名を標準列名へ解決した後、正規化テーブルには標準列名、標準型、正規化値だけを保存する |
+| 照合前正規化 | 原本列名と別名辞書登録値の双方に、前後空白除去、全半角正規化、連続空白の単一空白化を適用し、英字は `case-insensitive` として照合する |
+| 標準列名一致 | 入力列名が標準列名と一致する場合だけ、その標準列として扱う |
+| 明示別名一致 | 入力列名が対象入力プロファイルの `column_aliases` に登録されている場合だけ、対応する標準列へ変換する |
+| 原本情報の保存 | 原本列名、原本値、標準列名、正規化値、別名辞書バージョンを追跡できるようにする |
+| 別名の保存 | 原本列名、標準列名、別名辞書バージョンを `column_mappings` に保存する。正規化後データの列名には別名を残さない |
+| 同名重複列 | 原本 CSV ヘッダーに同一列名が複数存在する場合はエラー。照合前正規化によって同一候補になる場合は正規化後衝突として扱う |
+| 未知列 | 標準列名にも登録済み別名にも一致しない列名。`SCHEMA_UNKNOWN_COLUMN` として警告を出し、原本情報として保持するが、正規化後データ、内部処理、集計、成果物 JSON には使わない |
+| 未登録列名 | 未知列と同義。標準列名にも登録済み別名にも一致しない場合は警告付きで保持し、処理には使わない |
+| 曖昧な別名 | 1 つの入力列名が複数の標準列候補へ解決される場合は原則エラー |
+| 同一標準列に複数列が対応 | 複数の入力列が同一標準列へ解決される場合はエラー |
+| 正規化後衝突 | 照合前正規化の結果、複数の原本列名が同一候補になる場合はエラー |
+| 必須列欠落 | 標準列名への解決後に必須列が不足する場合はエラー。未知列または未登録別名は必須列の代替として扱わない |
+| 推測禁止 | 部分一致、類似度、表記ゆれ推定、LLM 推定で列名を補完してはならない |
+| 辞書版管理 | 別名辞書のバージョンを入力結果、`column_mappings`、成果物メタデータに残す |
+| 自由追加禁止 | 利用者入力や AI 判断で実行中に別名を追加してはならない。追加する場合は別名辞書の版を更新する |
+
+許容別名の初期例:
+
+| 標準列名 | 許容別名例 |
+| --- | --- |
+| `employee_name` | `氏名`, `従業員名`, `name` |
+| `work_date` | `勤務日`, `日付`, `date` |
+| `break_minutes` | `休憩時間`, `breakTime` |
+
+### 5.0.1 別名辞書
+
+別名辞書は、入力プロファイルごとに管理する版管理済み設定である。例: `attendance_csv.v1`, `employee_master_csv.v1`。
+
+別名辞書のエントリ:
+
+| 項目 | 内容 |
+| --- | --- |
+| `input_profile` | 対象入力プロファイル。例: `attendance_csv`, `employee_master_csv` |
+| `alias_dictionary_version` | 別名辞書の版。例: `attendance_csv.v1` |
+| `standard_column_name` | 対応先の標準列名 |
+| `alias_column_name` | 入力 CSV で許容する別名 |
+| `normalized_alias_key` | 照合前正規化後の別名キー |
+| `normalization_rule_version` | 列名照合前正規化ルールの版 |
+| `is_active` | 現行利用可否 |
+| `valid_from`, `valid_to` | 辞書版の有効期間 |
+| `created_by`, `created_at`, `approved_by`, `approved_at` | 作成者、作成日時、承認者、承認日時 |
+| `notes` | 変更理由、顧客固有事情など |
+
+別名辞書の管理ルール:
+
+| ルール | 内容 |
+| --- | --- |
+| 版の固定 | 1 回の `RunId` では使用した `alias_dictionary_version` を固定し、`source_files`、`column_mappings`、成果物メタデータに記録する |
+| 承認済み版のみ使用 | `is_active = true` かつ承認済みの辞書版だけを取込処理で使用する |
+| 版の不変性 | 承認済みの辞書版は実行中に変更しない。別名を追加、削除、変更する場合は新しい版を作る |
+| 別名キー一意性 | 同一 `input_profile`、同一 `alias_dictionary_version` 内で `normalized_alias_key` は一意でなければならない |
+| 標準列参照 | `standard_column_name` は対象入力プロファイルの標準列名として定義済みでなければならない |
+| 1 別名 1 標準列 | 1 つの `normalized_alias_key` が複数の標準列へ対応してはならない |
+| 自由追加禁止 | 利用者入力や AI 判断で実行中に別名を追加してはならない。追加する場合は別名辞書の版を更新する |
+| 無効化 | 廃止した別名は旧版に残し、新版で `is_active = false` またはエントリ削除として扱う。過去 `RunId` の再現では当時の版を参照する |
+| 辞書不整合 | 別名キー重複、未定義標準列参照、未承認版の使用、辞書版不明は設定不備としてエラーにする |
 
 ### 5.1 `employee_master.csv`
 
@@ -185,6 +274,37 @@ flowchart LR
 | `email` | no | string | メールアドレス | 内部のみ |
 
 標準キーは `employee_id + valid_from` である。同一従業員の部署異動や雇用区分変更は有効期間で表す。
+
+### 5.1.1 店舗、部署、雇用区分マスタの表示順
+
+店舗、部署、雇用区分マスタは、UI とレポートで同じ表示順を使う。表示順は固定ロジックではなく、各マスタが持つ `display_order` を正とする。`display_order` は顧客ごとのマスタ設定として管理し、実装コードに個別顧客の並び順をハードコードしない。対象は店舗マスタ、部署マスタ、雇用区分マスタ、無効化済み項目、および未登録値とする。
+
+対象:
+
+| 対象 | マスタ | 主キー |
+| --- | --- | --- |
+| 店舗 | 店舗マスタ | `store_id` |
+| 部署 | 部署マスタ | `department_id` |
+| 雇用区分 | 雇用区分マスタ | `employment_type` |
+| 無効化済み項目 | 対象マスタに依存 | `is_active = false`、または有効期間外 |
+| 未登録値 | なし | 入力値または正規化値 |
+| 同順位 | 対象マスタに依存 | 同一 `display_order`、または `display_order` 未設定 |
+
+| マスタ | 主キー | 表示名 | 表示順 |
+| --- | --- | --- | --- |
+| 店舗マスタ | `store_id` | `store_name` | `display_order` |
+| 部署マスタ | `department_id` | `department_name` | `display_order` |
+| 雇用区分マスタ | `employment_type` | `employment_type_name` | `display_order` |
+
+`display_order` は非負整数または null とする。値が小さいほど先に表示する。同一マスタ内で `display_order` が重複する場合は同順位として扱い、エラーにせず、コード昇順、次に名称昇順で安定化する。`display_order` が null の登録済み項目は、`display_order` 設定済みの登録済み項目の後ろに表示する。複数の null 項目も同順位として扱う。
+
+無効化済み項目は、対象マスタに存在するが、`is_active = false`、`valid_to` が表示対象期間より前、または同等の無効化状態を持つ項目を指す。無効化済み項目は原則非表示とする。ただし、過去データ参照時に当時の値を説明する必要がある場合だけ、一覧または帳票の末尾に表示する。無効化済み項目どうしは `display_order` 昇順、同順位時はコード昇順、次に名称昇順で安定化する。
+
+未登録値は、入力データに存在するが、店舗マスタ、部署マスタ、雇用区分マスタのいずれにも照合できない値を指す。未登録値に `display_order` は付与しない。
+
+未登録値、未照合、その他、推定項目は登録済み項目の後ろに表示する。同一グループ内はコードまたは入力値の昇順、次に名称昇順で安定化する。コードが空または欠損している場合は同一グループ内の末尾に置き、名称も欠損している場合は内部 ID 昇順で安定化する。
+
+この表示順は、店舗別、部署別、雇用区分別の一覧、フィルタ選択肢、集計表、抑制後レポートに適用する。抑制行は `EXTERNAL-DESIGN.md` の抑制行の扱いに従う。
 
 ### 5.2 `attendance.csv`
 
@@ -271,6 +391,13 @@ flowchart LR
 | `employee_id` | yes | string | 従業員 ID | 条件付き |
 | `fiscal_year` | yes | string | 年度 | 公開可 |
 | `leave_type` | yes | string | 有給、特別休暇等 | 条件付き |
+| `organization_grain` | no | enum | `Company`, `BusinessSite`, `Department`, `Team` | 公開可 |
+| `organization_id` | no | string | 表示対象組織 ID | 条件付き |
+| `organization_name` | no | string | 表示対象組織名 | 条件付き |
+| `employment_category` | no | enum | `RegularFullTime`, `ShortTimeRegular`, `FixedTermFullTime`, `PartTime`, `Other` | 集計可 |
+| `leave_grant_rule_category` | no | enum | `StandardGrant`, `ProportionalGrant`, `NotYetEligible` | 集計可 |
+| `five_day_obligation_status` | no | enum | `Target`, `NotTarget`, `Achieved`, `AtRisk`, `Unmet` | 集計可 |
+| `period_grain` | no | enum | `FiscalYear`, `CalendarMonth`, `LeaveGrantYear` | 公開可 |
 | `granted_days` | no | decimal | 付与日数 | 集計可 |
 | `used_days` | no | decimal | 使用日数 | 集計可 |
 | `remaining_days` | no | decimal | 残日数 | 条件付き |
@@ -396,6 +523,39 @@ flowchart LR
 | `planned_headcount` | decimal/null | 予定人数 |
 | `data_grain_id` | string | 粒度プロファイル ID |
 
+### 6.6.1 `norm_staffing_requirements`
+
+必要人数データは、`Store x Department x Role x TimeSlot` を標準粒度とする。日別だけでは時間帯別の過不足を扱えず、個人単位にすると目的が曖昧になるため、店舗、部署、役割、時間帯を最小の標準粒度にする。
+
+標準 CSV:
+
+```csv
+store_id,department_id,role_id,employment_class,date,time_slot_start,time_slot_end,required_headcount,min_headcount,max_headcount,source_kind,effective_from,effective_to,note
+S001,D010,cashier,part_time,2026-04-01,09:00,12:00,3,2,4,manual,2026-04-01,2026-09-30,
+S001,D010,cashier,part_time,2026-04-01,12:00,17:00,5,4,6,sales_forecast,2026-04-01,2026-09-30,
+```
+
+正規化テーブル:
+
+| 列 | 型 | 内容 |
+| --- | --- | --- |
+| `staffing_requirement_key` | string | 内部主キー |
+| `store_id` | string | 店舗 ID |
+| `department_id` | string | 部署 ID |
+| `role_id` | string | 役割 ID |
+| `employment_class` | string/null | 雇用区分または勤務区分 |
+| `date` | date | 対象日 |
+| `time_slot_start` | time | 時間帯開始 |
+| `time_slot_end` | time | 時間帯終了 |
+| `required_headcount` | decimal | 必要人数 |
+| `min_headcount` | decimal/null | 下限人数 |
+| `max_headcount` | decimal/null | 上限人数 |
+| `source_kind` | enum | `manual`, `sales_forecast`, `budget`, `shift_plan`, `other` |
+| `effective_from` | date | 有効開始日 |
+| `effective_to` | date/null | 有効終了日 |
+| `note` | string/null | 補足。個人情報を含めない |
+| `data_grain_id` | string | 粒度プロファイル ID |
+
 ### 6.7 `norm_fatigue_signals`
 
 | 列 | 型 | 内容 |
@@ -405,11 +565,75 @@ flowchart LR
 | `department_id` | string/null | 部署 ID |
 | `store_id` | string/null | 店舗 ID |
 | `measurement_date` | date | 測定日 |
-| `fatigue_score` | decimal/null | 個人疲労値。内部のみ |
-| `sleep_hours` | decimal/null | 睡眠時間。内部のみ |
-| `fatigue_comment` | string/null | 自由記述。内部のみ |
+| `scheduled_work_minutes` | integer/null | 所定労働時間。非負の分単位整数 |
+| `actual_work_minutes` | integer/null | 実労働時間。非負の分単位整数 |
+| `overtime_minutes` | integer/null | 残業時間。非負の分単位整数 |
+| `night_work_minutes` | integer/null | 深夜勤務時間。非負の分単位整数 |
+| `break_minutes` | integer/null | 休憩時間。非負の分単位整数 |
+| `break_shortage_flag` | boolean/null | 休憩不足フラグ |
+| `consecutive_work_days` | integer/null | 連続勤務日数。0 以上 |
+| `holiday_taken_days` | integer/null | 休日取得日数。0 以上 |
+| `paid_leave_taken_days` | decimal/null | 有休取得日数。0 以上 |
+| `absence_days` | decimal/null | 欠勤日数。0 以上。理由詳細は原則保持しない |
+| `fatigue_risk_category` | enum/null | `None`, `Low`, `Medium`, `High`。医学的診断ではなく労務リスク区分 |
 | `source_type` | string/null | 入力元種別 |
 | `privacy_class` | enum | 必ず `health` または `sensitive` |
+
+疲労関連データは、医学的診断ではなく、勤務実績から導出される労務リスク指標として扱う。病名、診断名、メンタルヘルスの自由記述、産業医面談内容、休職理由の詳細、上司コメントの原文は `norm_fatigue_signals` に保持しない。
+
+### 6.7.1 労働時間適用条件とルール評価トレース
+
+業種特例、変形労働時間制、管理監督者性、36 協定などは、長時間労働候補をハードコードで除外するフラグではなく、従業員、期間、根拠資料に紐づく適用条件として保持する。
+
+`EmployeeApplicabilityProfile`:
+
+| 列 | 型 | 内容 |
+| --- | --- | --- |
+| `employee_id` | string | 従業員 ID |
+| `effective_from` | date | 適用開始日 |
+| `effective_to` | date/null | 適用終了日 |
+| `working_time_policy_id` | string | 労働時間制度 ID |
+| `special_industry_policy_id` | string/null | 業種特例 ID |
+| `manager_supervisor_status` | enum | `not_applicable`, `candidate`, `verified`, `rejected`, `unknown` |
+| `agreement_36_profile_id` | string/null | 36 協定プロファイル ID |
+| `source_document_ref` | string/null | 根拠文書参照 |
+| `verification_status` | enum | `verified`, `needs_review`, `missing_evidence`, `expired`, `unknown` |
+
+`WorkingTimePolicy`:
+
+| 列 | 型 | 内容 |
+| --- | --- | --- |
+| `working_time_policy_id` | string | 労働時間制度 ID |
+| `policy_kind` | enum | `standard`, `one_month_variable`, `one_year_variable`, `flextime`, `discretionary`, `other` |
+| `calendar_required` | boolean | 制度判定に勤務カレンダーが必要か |
+| `overtime_calculation_basis` | enum | `statutory_month_frame`, `policy_calendar`, `agreement_36`, `unknown` |
+| `valid_from` | date | 有効開始日 |
+| `valid_to` | date/null | 有効終了日 |
+
+`LongWorkRuleSet`:
+
+| 列 | 型 | 内容 |
+| --- | --- | --- |
+| `rule_set_id` | string | ルールセット ID |
+| `version` | string | 版 |
+| `jurisdiction` | string | 適用地域。初期値は `JP` |
+| `threshold_profile` | json | 45h、80h 平均、100h、360h、720h、年 6 か月などの確認閾値 |
+| `applicability_condition` | json | 適用条件 |
+| `missing_data_behavior` | enum | `blocked`, `partial`, `issue_only` |
+
+`RuleEvaluationTrace`:
+
+| 列 | 型 | 内容 |
+| --- | --- | --- |
+| `run_id` | string | 実行 ID |
+| `employee_id` | string/null | 従業員 ID。公開用成果物では直接表示しない |
+| `rule_set_id` | string | 適用したルールセット |
+| `applied_policy` | string | 適用した労働時間制度または特例 |
+| `issue_code` | string | 出力 issue または check code |
+| `confidence` | enum | `confirmed`, `partial`, `missing_evidence`, `unknown` |
+| `reason` | string | 評価理由。生の勤務実績値や個人名を含めない |
+
+法令・制度上の適用条件確認と、疲労・過重労働リスク確認は別の出力層に分ける。管理監督者、変形労働時間制、業種特例は、疲労リスク確認候補の非表示条件にはしない。
 
 ### 6.8 `norm_leave_records`
 
@@ -419,12 +643,31 @@ flowchart LR
 | `employee_id` | string | 従業員 ID |
 | `fiscal_year` | string | 年度 |
 | `leave_type` | string | 休暇種別 |
+| `organization_grain` | enum | `Company`, `BusinessSite`, `Department`, `Team` |
+| `organization_id` | string/null | 表示対象組織 ID |
+| `organization_name` | string/null | 表示対象組織名 |
+| `employment_category` | enum/null | `RegularFullTime`, `ShortTimeRegular`, `FixedTermFullTime`, `PartTime`, `Other` |
+| `leave_grant_rule_category` | enum/null | `StandardGrant`, `ProportionalGrant`, `NotYetEligible` |
+| `five_day_obligation_status` | enum/null | `Target`, `NotTarget`, `Achieved`, `AtRisk`, `Unmet` |
+| `period_grain` | enum | `FiscalYear`, `CalendarMonth`, `LeaveGrantYear` |
 | `granted_days` | decimal/null | 付与日数 |
 | `used_days` | decimal/null | 使用日数 |
 | `remaining_days` | decimal/null | 残日数 |
 | `leave_date` | date/null | 取得日 |
 | `department_id` | string/null | マスタ照合後の部署 ID |
 | `store_id` | string/null | マスタ照合後の店舗 ID |
+
+`PaidLeaveDisplayGrain` は、次の構成要素を持つ表示粒度として扱う。
+
+| 構成要素 | 値 |
+| --- | --- |
+| `OrganizationGrain` | `Company`, `BusinessSite`, `Department`, `Team` |
+| `EmploymentCategory` | `RegularFullTime`, `ShortTimeRegular`, `FixedTermFullTime`, `PartTime`, `Other` |
+| `LeaveGrantRuleCategory` | `StandardGrant`, `ProportionalGrant`, `NotYetEligible` |
+| `FiveDayObligationStatus` | `Target`, `NotTarget`, `Achieved`, `AtRisk`, `Unmet` |
+| `PeriodGrain` | `FiscalYear`, `CalendarMonth`, `LeaveGrantYear` |
+
+初期の有給取得状況レポートは、`OrganizationGrain`、`LeaveGrantRuleCategory`、`FiveDayObligationStatus`、`PeriodGrain = FiscalYear` を組み合わせた粒度を優先する。例: `Department / StandardGrant / Target / 2026年度`。
 
 ### 6.9 `norm_share_candidates`
 
@@ -567,7 +810,7 @@ flowchart LR
 | `reason_code` | string | 抑制理由コード |
 | `reason_message` | string | 利用者向け抑制理由 |
 | `affected_count` | integer/null | 抑制対象件数 |
-| `threshold_name` | string/null | 閾値名。例 `small_group_min_count` |
+| `threshold_name` | string/null | 閾値名。例 `small_group_min_effective_data_count` |
 | `threshold_value` | string/null | 実行時閾値 |
 | `created_at` | datetime | 作成時刻 |
 
@@ -597,6 +840,8 @@ flowchart LR
 | `run_settings` | 実行設定、閾値、対象データセット | 長期 |
 | `source_files` | 原本 CSV の保存情報、ハッシュ、読み込み設定 | 長期 |
 | `raw_csv_rows` | 原本行の参照、ハッシュ、パース状態 | 任意。監査要件に応じて長期 |
+| `column_alias_dictionaries` | 別名辞書バージョン、承認状態、有効期間 | 長期 |
+| `column_aliases` | 別名辞書エントリ、標準列との対応 | 長期 |
 | `column_mappings` | 原本列と標準列の対応 | 長期 |
 | `schema_checks` | 必須列、型、形式の検査結果 | 実行単位 |
 | `norm_employees` | 正規化従業員マスタ | 再生成可能 |
@@ -613,6 +858,7 @@ flowchart LR
 | `analysis_checkpoints` | 業務確認ポイント | 実行単位 |
 | `aggregate_metrics` | 集計メトリクス | 実行単位 |
 | `privacy_suppressions` | 抑制結果 | 実行単位 |
+| `raw_data_access_events` | 抑制前データへのアクセス監査 | 長期 |
 | `artifacts` | 成果物メタデータ | 長期 |
 | `recheck_comparisons` | 修正前後比較 | 長期 |
 | `guide_documents` | ガイド AI 検索対象メタデータ | 任意 |
@@ -624,6 +870,7 @@ flowchart LR
 ```sql
 CREATE TABLE runs (
   run_id TEXT PRIMARY KEY,
+  tenant_id TEXT NOT NULL,
   run_status TEXT NOT NULL,
   readiness_status TEXT,
   period_start DATE,
@@ -660,9 +907,39 @@ CREATE TABLE source_files (
   detected_row_count INTEGER,
   detected_column_count INTEGER,
   schema_profile_version TEXT NOT NULL,
+  alias_dictionary_version TEXT NOT NULL,
   ingested_at TEXT NOT NULL,
   immutable INTEGER NOT NULL DEFAULT 1,
   FOREIGN KEY (run_id) REFERENCES runs(run_id)
+);
+
+CREATE TABLE column_alias_dictionaries (
+  input_profile TEXT NOT NULL,
+  alias_dictionary_version TEXT NOT NULL,
+  normalization_rule_version TEXT NOT NULL,
+  is_active INTEGER NOT NULL,
+  created_by TEXT,
+  created_at TEXT NOT NULL,
+  approved_by TEXT,
+  approved_at TEXT,
+  valid_from TEXT NOT NULL,
+  valid_to TEXT,
+  notes TEXT,
+  PRIMARY KEY (input_profile, alias_dictionary_version)
+);
+
+CREATE TABLE column_aliases (
+  column_alias_id TEXT PRIMARY KEY,
+  input_profile TEXT NOT NULL,
+  alias_dictionary_version TEXT NOT NULL,
+  standard_column_name TEXT NOT NULL,
+  alias_column_name TEXT NOT NULL,
+  normalized_alias_key TEXT NOT NULL,
+  is_active INTEGER NOT NULL DEFAULT 1,
+  notes TEXT,
+  FOREIGN KEY (input_profile, alias_dictionary_version)
+    REFERENCES column_alias_dictionaries(input_profile, alias_dictionary_version),
+  UNIQUE (input_profile, alias_dictionary_version, normalized_alias_key)
 );
 
 CREATE TABLE column_mappings (
@@ -671,6 +948,7 @@ CREATE TABLE column_mappings (
   source_file_id TEXT NOT NULL,
   raw_column_name TEXT NOT NULL,
   standard_column_name TEXT,
+  alias_dictionary_version TEXT NOT NULL,
   mapping_status TEXT NOT NULL,
   confidence TEXT,
   issue_id TEXT,
@@ -709,7 +987,36 @@ CREATE INDEX idx_issues_run_severity ON issues(run_id, severity);
 CREATE INDEX idx_issues_source_row ON issues(source_file_id, source_row_number);
 ```
 
-### 10.4 粒度・結合 DDL 例
+### 10.4 `raw_data_access_events` DDL 例
+
+抑制前データへのアクセスは Default Deny とし、許可された操作だけを監査ログに残す。監査ログは追記型を前提に、前イベントハッシュとイベントハッシュを持たせる。
+
+```sql
+CREATE TABLE raw_data_access_events (
+  access_event_id TEXT PRIMARY KEY,
+  run_id TEXT NOT NULL,
+  dataset_id TEXT NOT NULL,
+  actor_id TEXT NOT NULL,
+  actor_role TEXT NOT NULL,
+  access_purpose TEXT NOT NULL,
+  ticket_number TEXT NOT NULL,
+  scope_ref TEXT NOT NULL,
+  approved_by TEXT,
+  approval_ref TEXT,
+  valid_from TEXT NOT NULL,
+  valid_until TEXT NOT NULL,
+  accessed_at TEXT NOT NULL,
+  access_result TEXT NOT NULL,
+  denial_reason TEXT,
+  previous_event_hash TEXT,
+  event_hash TEXT NOT NULL,
+  FOREIGN KEY (run_id) REFERENCES runs(run_id)
+);
+```
+
+`actor_role` は、システム管理者、監査担当、データ保護責任者、限定された運用担当に対応する値に限定する。一般管理者、通常 UI、RAG、ガイド AI からの抑制前データ参照は `access_result = denied` として記録するか、呼び出し経路自体を公開しない。
+
+### 10.5 粒度・結合 DDL 例
 
 ```sql
 CREATE TABLE data_grains (
@@ -750,7 +1057,7 @@ CREATE TABLE join_assessments (
 );
 ```
 
-### 10.5 成果物 DDL 例
+### 10.6 成果物 DDL 例
 
 ```sql
 CREATE TABLE artifacts (
@@ -786,7 +1093,7 @@ CREATE TABLE recheck_comparisons (
 );
 ```
 
-### 10.6 推奨インデックス
+### 10.7 推奨インデックス
 
 | テーブル | インデックス | 目的 |
 | --- | --- | --- |
@@ -797,6 +1104,8 @@ CREATE TABLE recheck_comparisons (
 | `norm_labor_costs` | `(run_id, target_month, department_id)` | 部署別人件費集計 |
 | `norm_sales_records` | `(run_id, store_id, sales_date)` | 売上・人員不足確認 |
 | `issues` | `(run_id, severity, issue_category)` | issue 一覧 |
+| `raw_data_access_events` | `(run_id, dataset_id, accessed_at)` | 抑制前データアクセス監査 |
+| `raw_data_access_events` | `(actor_id, accessed_at)` | 利用者別アクセス監査 |
 | `join_assessments` | `(run_id, left_dataset_kind, right_dataset_kind)` | 結合可否参照 |
 | `artifacts` | `(run_id, artifact_kind)` | 成果物検索 |
 
@@ -832,6 +1141,12 @@ CREATE TABLE recheck_comparisons (
 | `metric_category` | enum | `attendance`, `labor_cost`, `sales`, `shift`, `fatigue`, `leave`, `privacy` |
 | `target_grain` | string | 集計粒度 |
 | `target_ref` | string/null | 店舗、部署、雇用区分など |
+| `display_grain_key` | string/null | 表示粒度キー。例 `Department:営業部|StandardGrant|Target|FiscalYear:2026` |
+| `organization_grain` | string/null | 有給表示用の組織粒度 |
+| `employment_category` | string/null | 有給表示用の雇用区分 |
+| `leave_grant_rule_category` | string/null | 有給表示用の付与ルール区分 |
+| `five_day_obligation_status` | string/null | 有給表示用の年5日義務区分 |
+| `period_grain` | string/null | 有給表示用の期間粒度 |
 | `period_start` | date | 対象開始日 |
 | `period_end` | date | 対象終了日 |
 | `value_decimal` | decimal/null | 数値 |
@@ -864,6 +1179,11 @@ out/
     staffing_checkpoints.csv
     monthly_labor_summary.csv
     privacy_suppressions.csv
+    internal_check_report.md
+    internal_check_report.json
+    ui_report.json
+    share_report.pdf
+    share_suppressed.csv
     external_share_checklist.csv
     recheck_comparison.json        # 再確認実行の場合
     recheck_comparison.csv         # 再確認実行の場合
@@ -871,12 +1191,115 @@ out/
 
 すべての成果物は `artifact_manifest.json` に登録する。ファイルパス、ハッシュ、生成時刻、スキーマバージョン、プライバシー抑制済みかどうかを追跡する。
 
-### 12.2 `artifact_manifest.json`
+### 12.2 出力形式方針
+
+| 用途 | ファイル | 形式 | 内容 |
+| --- | --- | --- | --- |
+| 内部確認用 | `internal_check_report.md` | Markdown | 担当者が読む確認資料。要約、制約、主要 issue、根拠表への参照を含む。 |
+| 内部確認用 | 各種 `*.csv` | CSV | issue、確認ポイント、集計、抑制結果を機械的に確認するための表。 |
+| 内部確認用 | `internal_check_report.json` | JSON | Markdown と CSV を束ねる構造化レポート。テストと再生成確認に使う。 |
+| 共有用 | `share_report.pdf` | PDF | 抑制済みの共有資料。1 ページ目に要約、2 ページ目以降に詳細表を置く。 |
+| 共有用 | `share_suppressed.csv` | CSV | 抑制後の共有用表。少人数部署、個人情報、健康関連情報は抑制済みにする。 |
+| UI 表示用 | `ui_report.json` | JSON | Local UI が画面表示に使う構造化データ。 |
+
+PDF では、グラフは補助扱いとし、根拠テーブル、抑制理由、RunId、入力ハッシュ、対象期間、実行設定を追跡できる表を主にする。
+
+### 12.3 RunArtifact トレーサビリティスキーマ
+
+すべての処理成果物は `RunId` に紐づけ、入力、正規化結果、抑制ポリシー、出力、監査ログを追跡可能にする。
+
+```typescript
+type RunArtifact = {
+  run_id: RunId;
+  tenant_id: TenantId;
+  input_ref: InputRef;
+  normalized_ref: NormalizedRef;
+  policy_ref: PolicyRef;
+  output_ref: OutputRef;
+  audit_ref: AuditRef;
+  created_by: ActorId;
+  created_at: DateTime;
+  status: RunStatus;
+};
+
+type InputRef = {
+  input_id: SourceFileId;
+  file_name: string;
+  file_hash_sha256: string;
+  uploaded_at: DateTime;
+  tenant_id: TenantId;
+  schema_version: string;
+};
+
+type NormalizedRef = {
+  normalized_dataset_id: DatasetId;
+  normalization_rule_version: string;
+  column_mapping_version: string;
+};
+
+type PolicyRef = {
+  suppression_policy_version: string;
+  inference_threshold_k: number;
+  rag_index_version: string;
+  access_policy_version: string;
+};
+
+type OutputRef = {
+  artifact_id: ArtifactId;
+  output_hash_sha256: string;
+  generated_at: DateTime;
+};
+
+type AuditRef = {
+  actor_id: ActorId;
+  actor_role: string;
+  execution_reason: string;
+  access_log_ref: string;
+};
+```
+
+最小スキーマ:
+
+```json
+{
+  "run_id": "run_01HX0000000000000000000000",
+  "tenant_id": "tenant_01HX0000000000000000000000",
+  "input_ref": {
+    "input_id": "src_01HX0000000000000000000001",
+    "file_name": "attendance_202604.csv",
+    "file_hash_sha256": "...",
+    "schema_version": "attendance_csv.v1",
+    "uploaded_at": "2026-06-02T10:00:00+09:00"
+  },
+  "normalized_ref": {
+    "normalized_dataset_id": "ds_01HX0000000000000000000001",
+    "normalization_rule_version": "normalization.v1",
+    "column_mapping_version": "column_mapping.v1"
+  },
+  "policy_ref": {
+    "suppression_policy_version": "privacy_policy.v1",
+    "inference_threshold_k": 10,
+    "rag_index_version": "rag_index.v1",
+    "access_policy_version": "raw_access_policy.v1"
+  },
+  "output_ref": {
+    "artifact_id": "art_01HX0000000000000000000001",
+    "output_hash_sha256": "...",
+    "generated_at": "2026-06-02T10:20:30+09:00"
+  },
+  "created_by": "user_01HX0000000000000000000000",
+  "created_at": "2026-06-02T10:20:30+09:00",
+  "status": "completed"
+}
+```
+
+### 12.4 `artifact_manifest.json`
 
 ```json
 {
   "schema_version": "artifact_manifest.v1",
   "run_id": "run_01HX0000000000000000000000",
+  "tenant_id": "tenant_01HX0000000000000000000000",
   "generated_at": "2026-06-02T10:20:30+09:00",
   "artifacts": [
     {
@@ -894,12 +1317,13 @@ out/
 }
 ```
 
-### 12.3 `run_summary.json`
+### 12.5 `run_summary.json`
 
 ```json
 {
   "schema_version": "run_summary.v1",
   "run_id": "run_01HX0000000000000000000000",
+  "tenant_id": "tenant_01HX0000000000000000000000",
   "run_status": "completed",
   "readiness_status": "partial",
   "period": {
@@ -917,8 +1341,42 @@ out/
       "schema_profile_version": "attendance_csv.v1"
     }
   ],
+  "run_artifact": {
+    "input_ref": {
+      "input_id": "src_01HX0000000000000000000001",
+      "file_name": "attendance_202604.csv",
+      "file_hash_sha256": "...",
+      "schema_version": "attendance_csv.v1",
+      "uploaded_at": "2026-06-02T10:00:00+09:00"
+    },
+    "normalized_ref": {
+      "normalized_dataset_id": "ds_01HX0000000000000000000001",
+      "normalization_rule_version": "normalization.v1",
+      "column_mapping_version": "column_mapping.v1"
+    },
+    "policy_ref": {
+      "suppression_policy_version": "privacy_policy.v1",
+      "inference_threshold_k": 10,
+      "rag_index_version": "rag_index.v1",
+      "access_policy_version": "raw_access_policy.v1"
+    },
+    "output_ref": {
+      "artifact_id": "art_01HX0000000000000000000001",
+      "output_hash_sha256": "...",
+      "generated_at": "2026-06-02T10:20:30+09:00"
+    },
+    "audit_ref": {
+      "actor_id": "user_01HX0000000000000000000000",
+      "actor_role": "operator",
+      "execution_reason": "monthly_labor_check",
+      "access_log_ref": "audit_01HX0000000000000000000001"
+    }
+  },
   "settings": {
-    "small_group_min_count": 5,
+    "small_group_min_effective_data_count": 10,
+    "caution_group_min_effective_data_count": 30,
+    "overtime_holiday_month_attention_minutes": 2700,
+    "overtime_holiday_basis": "monthly_total_work_minutes - (month_calendar_days / 7 * 40h)",
     "target_dataset_kinds": ["employee_master", "attendance", "labor_cost"]
   },
   "issue_counts": {
@@ -950,7 +1408,7 @@ out/
 }
 ```
 
-### 12.4 `profile_report.json`
+### 12.6 `profile_report.json`
 
 ```json
 {
@@ -1157,34 +1615,73 @@ out/
 9. 法的判断、医療判断、人事評価、外部共有可否の結論として読める文言を含まない。
 10. ガイド AI が参照する成果物は、必ずプライバシー抑制後のファイルまたは抑制済み DB ビューに限定する。
 
+### 14.1 レポート生成責務
+
+初期実装では、Rust core layer は再現性のある中間成果物までを責務とし、PDF 生成と印刷向けレイアウトは post-processing layer に残す。
+
+| 層 | 責務 |
+| --- | --- |
+| Core Rust Layer | `inspection_result.json`, `aggregate_result.csv`, `public_report_model.json`, `report.md` |
+| Post-processing Layer | `report.pdf`, printable layout, styling, font handling |
+
+PDF は共有用成果物として扱い、入力は抑制済みの JSON、CSV、Markdown に限定する。PDF 生成方式は Typst 等の後段ツールを候補にし、core logic の検査、集計、抑制とは分離する。
+
 ## 15. RAG / ガイド AI 向けデータ境界
 
-ガイド AI が検索対象にしてよいデータは次に限定する。
+ガイド AI が検索対象にしてよいデータは、承認済み、版管理済み、抑制後情報に限定する。
 
 | 対象 | 参照可否 | 条件 |
 | --- | --- | --- |
-| 製品ドキュメント | 可 | 公開用仕様文書のみ |
-| レポート定義 | 可 | 抑制対象の例値を含まないこと |
-| 制約条件 | 可 | 業務ルール、抑制ルール、注意文 |
-| 生成済みレポート | 可 | `privacy_filtered = true` の成果物のみ |
+| 製品マニュアル | 可 | 承認済み、版管理済みであること |
+| 労務コンパスの仕様書 | 可 | 承認済み、版管理済みであること |
+| 操作 FAQ | 可 | 承認済み、版管理済みであること |
+| 用語集 | 可 | 承認済み、版管理済みであること |
+| 承認済みの労務ルール解説 | 可 | 承認済み、版管理済みであること |
+| 顧客別設定情報 | 条件付き | `tenant_id` によるテナント分離があり、抑制対象情報を含まないこと |
+| 抑制済み集計結果 | 条件付き | `privacy_filtered = true` で、個人推測リスク判定後であること |
 | `issues.csv` | 条件付き | 氏名、メール、疲労値、睡眠時間、自由記述がマスク済みであること |
 | `norm_fatigue_signals` | 不可 | 内部データのため直接参照不可 |
 | 原本 CSV | 不可 | 原本保護と個人情報保護のため直接参照不可 |
+| 抑制前 CSV | 不可 | 情報漏洩リスクが高いため直接参照不可 |
+| 個人別データ | 不可 | RAG に入れるべきではない |
 | 抑制前集計 | 不可 | 個人推測リスクがあるため直接参照不可 |
+| 監査ログ | 不可 | 機密性が高いため検索対象にしない |
+| 下書き文書 | 不可 | 未承認情報を回答するリスクがある |
+| Slack、メール、チケット原文 | 原則不可 | 個人情報、未確認情報、文脈外情報が混入しやすい |
 
 必要に応じて、`guide_documents` テーブルに検索対象メタデータを保存する。
 
 | 列 | 型 | 内容 |
 | --- | --- | --- |
 | `guide_document_id` | string | 文書 ID |
+| `tenant_id` | string/null | 顧客別設定情報または顧客別レポートのテナント ID。共通文書は null 可 |
 | `run_id` | string/null | 実行 ID。仕様文書は null 可 |
 | `artifact_id` | string/null | 成果物 ID |
-| `document_kind` | enum | `product_doc`, `report_definition`, `generated_report`, `constraint` |
+| `document_kind` | enum | `product_manual`, `product_spec`, `operation_faq`, `glossary`, `approved_labor_rule`, `tenant_setting`, `privacy_filtered_report`, `constraint` |
 | `title` | string | タイトル |
 | `relative_path` | string | ローカルパス |
 | `content_hash_sha256` | string | 内容ハッシュ |
+| `document_version` | string | 文書版 |
+| `approval_status` | enum | `approved`, `retired`, `revoked` |
+| `approved_by` | string/null | 承認者 |
+| `approved_at` | datetime/null | 承認時刻 |
+| `source_updated_at` | datetime | 元文書の更新時刻 |
+| `rag_index_version` | string | インデックス版 |
+| `privacy_safe` | boolean | RAG 参照に使ってよい安全確認済み文書か |
 | `privacy_filtered` | boolean | 抑制済みか |
 | `indexed_at` | datetime | インデックス化時刻 |
+| `retired_at` | datetime/null | 廃止、撤回、非公開化された時刻 |
+
+インデックス更新条件は次の通り固定する。
+
+| 更新条件 | 扱い |
+| --- | --- |
+| 通常更新 | 承認済み文書が更新されたとき |
+| 定期更新 | 毎日またはリリースごと |
+| 強制更新 | 法改正、仕様変更、FAQ 重大修正時 |
+| 無効化 | 文書が廃止、撤回、非公開化されたとき |
+| 版管理 | 回答には参照文書 ID、版、更新日を紐づける |
+| 禁止 | 未承認文書、抑制前データ、個人別データのインデックス投入 |
 
 ## 16. スキーマバージョン管理
 
@@ -1216,7 +1713,8 @@ out/
 | 入力ハッシュ、実行履歴 | 長期保持推奨 |
 | 正規化データ | 再生成可能。容量制約に応じて削除可 |
 | issue | 再確認履歴との比較に使うため保持推奨 |
-| 疲労関連内部データ | 最小保持。アクセス制限必須 |
+| 疲労関連内部データ | 最小保持。抑制前データアクセス制御と監査ログ必須 |
+| 抑制前データアクセス監査 | 長期保持推奨。改ざん困難な形で保持 |
 | 抑制後成果物 | 共有・確認用途のため保持可 |
 | ガイド AI インデックス | 抑制済みデータだけを保持 |
 
@@ -1233,15 +1731,35 @@ out/
 | 再確認 | `recheck_comparisons` に修正前後の RunId、入力ハッシュ、issue 件数差分があること |
 | ローカル DB 処理 | 10000 人 × 3 年分の勤怠行を想定し、検索キーとインデックスが設計されていること |
 
+### 18.1 ScaleFixtureProfile
+
+10000 人 x 3 年分の scale fixture は、固定 seed の合成データ生成器で作る。実データ風の分布を持たせるが、実在個人、実在店舗、実在部署を含めてはならない。
+
+```text
+ScaleFixtureProfile
+  employee_count: 10000
+  period: 3 years
+  store_count
+  department_distribution
+  employment_class_distribution
+  work_pattern_distribution
+  overtime_pattern_distribution
+  missing_punch_rate
+  paid_leave_pattern
+  small_department_cases
+  manager_supervisor_cases
+  variable_working_time_cases
+  special_industry_cases
+  random_seed
+```
+
+scale fixture は、単なる巨大 CSV ではなく、検査したい性質を意図的に含める。少人数部署、欠勤、打刻漏れ、長時間労働、連続勤務、変形労働時間制、管理監督者候補、業種特例候補を含め、期待される issue code と business check code を固定する。
+
 ## 19. 未決事項
 
-| ID | 未決事項 | 決定先 |
-| --- | --- | --- |
-| DD-OPEN-001 | CSV 列名の別名辞書の初期セット | `DATA-DESIGN.md` 改訂または実装設定 |
-| DD-OPEN-002 | 少人数部署の閾値 | `BUSINESS-RULES.md` |
-| DD-OPEN-003 | 長時間労働候補などの具体判定式 | `BUSINESS-RULES.md` |
-| DD-OPEN-004 | ローカル DB エンジンの最終選定 | `ARCHITECTURE.md` |
-| DD-OPEN-005 | 保存時暗号化、アクセス制御、ログマスキング | `ARCHITECTURE.md`, `OPERATIONS.md` |
-| DD-OPEN-006 | PDF / Markdown レポートの見た目 | `EXTERNAL-DESIGN.md` |
-| DD-OPEN-007 | ガイド AI のインデックス更新条件 | `ARCHITECTURE.md`, `OPERATIONS.md` |
+現時点で、本書で保留する主要未決事項はない。
 
+| ID | 決定内容 | 反映先 |
+| --- | --- | --- |
+| DD-OPEN-003 | 長時間労働候補の業種特例、変形労働時間制、管理監督者などは、`EmployeeApplicabilityProfile`、`WorkingTimePolicy`、`LongWorkRuleSet`、`RuleEvaluationTrace` で扱う。 | `BUSINESS-RULES.md`, `DATA-DESIGN.md` |
+| DD-OPEN-005 | 保存時暗号化とログマスキングは初期から必須境界とし、詳細運用は `OPERATIONS.md` に分離する。 | `ARCHITECTURE.md`, `OPERATIONS.md` |

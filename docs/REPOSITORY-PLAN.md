@@ -129,10 +129,16 @@ CLI-only ではなく、最初からローカルサーバーとローカルDBの
 | Performance smoke | 10000人 × 3年分の勤怠データを想定した scale fixture を処理できること |
 | UI smoke | local UI が core logic を再計算せず、local server から progress と reports を読み込むこと |
 
-## 未決事項
+## 設計判断
 
-- ローカルDBに SQLite を使うか、DuckDB など分析向きの選択肢を使うか。
-- 最初の data-ingest slice で `polars`、`csv`、またはより狭い Rust CSV pipeline のどれを使うか。
-- 10000人 × 3年分の scale fixture を実データ風に生成する方法。
-- report Markdown/PDF rendering を最初から Rust に置くか、post-processing layer に残すか。
-- local RAG を最初の local UI milestone に含めるか、data-quality workflow が安定するまで後回しにするか。
+未決事項は、初期実装の段階導入方針として次の通り閉じる。
+
+| ID | 決定 | 理由 |
+| --- | --- | --- |
+| `REPO-OPEN-001` | System of record は PostgreSQL とする。DuckDB は後段の分析補助候補に留める。 | RunId、正規化データ、issue、監査、成果物メタデータ、ジョブ状態を制約とトランザクションで扱う必要があるため。 |
+| `REPO-OPEN-002` | 最初の data-ingest slice は Rust `csv` crate による狭い CSV pipeline にする。Polars は後段候補。 | 初期目的は高速 DataFrame 集計ではなく、汚れた CSV の行単位読取、標準列名解決、検査、issue 化を安定させることだから。 |
+| `REPO-OPEN-003` | 10000人 x 3年分の scale fixture は固定 seed の合成データ生成器で作る。 | 実データ風の分布、少人数部署、長時間労働、打刻漏れ、変形労働時間制、管理監督者候補などを再現可能に混ぜるため。 |
+| `REPO-OPEN-004` | Rust core は JSON、CSV、Markdown まで。PDF は post-processing layer に残す。 | core logic は検査、集計、抑制、再現性に集中し、PDF のレイアウト、フォント、印刷調整を後段で変更しやすくするため。 |
+| `REPO-OPEN-005` | local RAG は最初の local UI milestone から外す。 | 先に data-quality workflow、IssueCode、RuleExplanation、評価トレースを安定させ、RAG は検索対象、更新条件、評価データが固まってから導入するため。 |
+
+初期 UI では、RAG の代わりに deterministic な `RuleExplanation` を表示する。

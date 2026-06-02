@@ -20,6 +20,8 @@ Related:
 
 この文書は、LaborLens の主要求仕様から Lean で先に検証すべきコアロジックを抽出し、型、述語、不変条件、定理候補、検証順序、本番実装への移行条件を定義するための計画文書である。
 
+Lean 検証の主対象はコアロジックに限定する。CSV パーサ、ファイルシステム IO、GUI 操作、PDF / Markdown の見た目は無理に Lean 仕様化しない。入出力の境界を扱う場合も、実 GUI ではなく、疑似 CLI コマンド、入力参照、出力 artifact の構造を表す最小モデルにとどめる。
+
 LaborLens では、コアロジックに該当する処理について、本番実装に入る前に Lean 仕様化と Lean 検証を行う。Lean 検証が未完了のコアロジックは、本番実装ではなく `prototype`、`spike`、`demo` として扱う。
 
 Lean で先に固定する対象は、画面、PDF、Markdown、自然文、CSV パーサ、DB 物理設計の詳細ではない。対象は、製品の安全性、信頼性、データ分類の正しさを支える仕様である。具体的には、プライバシー境界、少人数部署抑制、原本保護、粒度判定、結合可否、従業員マスタ照合、issue / report 分類、成果物の `RunId` 保持を優先する。
@@ -68,8 +70,10 @@ Lean で扱う代表例は次のとおりである。
 
 - 画面レイアウト
 - UI 操作フロー
+- GUI 入出力仕様
 - PDF / Markdown の見た目
 - CSV パーサの詳細実装
+- ファイルシステム IO の詳細実装
 - ローカル DB の物理スキーマ
 - バックグラウンドジョブの実装方式
 - パフォーマンス目標値
@@ -195,9 +199,9 @@ Lean で型、述語、不変条件、定理候補として表現しやすい処
 | P1 | 粒度判定と結合可否 | `FR-GRAIN-001`, `FR-GRAIN-002`, `FR-GRAIN-003` | 従業員 ID を持たない人件費データが個人勤怠と結合可能に分類されない | 結合処理は `JoinAssessment` を前提にする |
 | P1 | 従業員マスタ照合 | `FR-MASTER-001`, `FR-MASTER-002` | 未登録従業員、退職済み、部署不一致が確認対象 issue を生成する | マスタ照合結果は issue 出力の前提になる |
 | P1 | issue / report 分類 | `NFR-UX-002`, `NFR-UX-003` | データ品質 issue と業務確認ポイントが混在しない | issue CSV と業務レポートの型を分ける |
-| P2 | 成果物の `RunId` 保持 | `FLOW-002`, `NFR-REL-002` | すべての成果物が `RunId`、入力参照、実行設定参照を持つ | 成果物生成時に `RunId` を必須フィールドにする |
+| P2 | 成果物の `RunId` 保持 | `FLOW-002`, `NFR-REL-002`, `NFR-REL-004` | すべての成果物が `RunId`、入力参照、正規化参照、ポリシー参照、出力参照、監査参照を持つ | 成果物生成時に `RunArtifact` を必須フィールドにする |
 | P2 | 準備状態 | `ready`, `partial`, `blocked` | `blocked` の入力から完全レポートが生成されない | レポート生成前に readiness を確認する |
-| P2 | ガイド AI の安全境界 | `FR-PRIVACY-005`, `NFR-SEC-002`, `AI-SAFE` | 抑制対象情報がガイド AI の回答対象データに含まれない | RAG 対象は公開用出力または根拠文書に限定する |
+| P2 | ガイド AI の安全境界 | `FR-PRIVACY-005`, `NFR-SEC-002`, `AI-SAFE` | 抑制対象情報がガイド AI の回答対象データに含まれない | RAG 対象は承認済み、版管理済み、抑制後情報に限定する |
 
 ## 6. Lean 化マップ
 
@@ -235,7 +239,13 @@ flowchart LR
 | `DepartmentId` | 部署識別子 | P0 | 少人数部署抑制に使う |
 | `StoreId` | 店舗識別子 | P2 | 店舗別集計、運用確認に使う |
 | `RunId` | 実行識別子 | P2 | 成果物と入力参照の紐づけに使う |
+| `TenantId` | テナント識別子 | P2 | 顧客別設定情報と RAG 対象の分離に使う |
 | `InputHash` | 原本入力のハッシュ | P1 | 原本保護、再確認に使う |
+| `InputRef` | 入力参照 | P1 | 入力ファイル ID、SHA-256、アップロード時刻、テナント ID、スキーマバージョン |
+| `NormalizedRef` | 正規化結果参照 | P1 | 正規化済みデータ ID、正規化ルール版、列名マッピング版 |
+| `PolicyRef` | ポリシー参照 | P1 | 抑制ポリシー版、個人推測リスク閾値、RAG 許可文書版、アクセス制御版 |
+| `OutputRef` | 出力参照 | P1 | 抑制済み成果物 ID、出力ハッシュ、生成時刻 |
+| `AuditRef` | 監査参照 | P1 | 実行者、権限、実行理由、アクセスログ |
 | `DatasetKind` | 入力データ種別 | P1 | 勤怠、人件費、売上、従業員マスタ、疲労関連データなど |
 | `DataGrain` | データ粒度 | P1 | 従業員別、部署別、店舗別、日別、月別、時間帯別など |
 | `ReadinessStatus` | データ準備状態 | P2 | `ready`、`partial`、`blocked` |
@@ -243,15 +253,25 @@ flowchart LR
 | `IssueCode` | issue コード | P1 | 詳細体系は `BUSINESS-RULES.md` と `ACCEPTANCE-CRITERIA.md` で定義 |
 | `IssueSeverity` | issue 優先度 | P1 | critical、high、medium、low |
 | `PrivacyStatus` | 表示可能、抑制済みなどの状態 | P0 | 公開用出力の安全状態を表す |
-| `FatigueValue` | 内部データとしての個人疲労値 | P0 | 公開用出力に含めない |
-| `SleepDuration` | 内部データとしての睡眠時間 | P0 | 公開用出力に含めない |
-| `FatigueComment` | 内部データとしての疲労コメント | P0 | 公開用出力に含めない |
+| `WorkRiskSignal` | 勤務実績から導出する労務リスク指標 | P0 | 長時間労働、深夜勤務、休憩不足、連勤、有休取得不足など。医学的診断ではない |
+| `FatigueRiskCategory` | 疲労リスク区分 | P0 | `None`、`Low`、`Medium`、`High`。公開用出力では個人単位にしない |
+| `FatigueValue` | 内部データとしての個人疲労リスク値 | P0 | 公開用出力に含めない。医学的診断として扱わない |
+| `SleepDuration` | 内部データとしての睡眠時間 | P0 | 入力に含まれる場合も公開用出力に含めない |
+| `FatigueComment` | 入力に含まれ得る疲労関連自由記述 | P0 | 正規化対象にせず、公開用出力に含めない |
 | `InternalDataset` | 抑制前の内部データ | P0 | 公開用出力と型分離する |
 | `AnalysisDataset` | 集計・確認ポイント整理に使う内部データ | P0 | 公開前に抑制を通す |
 | `AggregateGroup` | 集計単位 | P0 | 少人数部署抑制に使う |
 | `PublicReport` | ユーザー向けまたは外部向けの公開用出力 | P0 | 抑制済み出力のみを表す |
 | `SuppressionReason` | 抑制理由 | P0 | 少人数、健康関連、個人推測リスクなど |
+| `AccessRole` | 抑制前データへのアクセス主体ロール | P0 | システム管理者、監査担当、データ保護責任者、限定運用担当など |
+| `AccessPurpose` | 抑制前データ参照目的 | P0 | 明示目的とチケット番号を持つ |
+| `AccessScope` | 抑制前データ参照範囲 | P0 | 必要最小限の `RunId`、`DatasetId`、対象期間 |
+| `Approval` | 抑制前データ参照承認 | P0 | 承認者、承認参照、期限を持つ |
+| `AccessTime` | 抑制前データ参照時刻 | P0 | 期間制限の判定に使う |
 | `Artifact` | 生成成果物 | P2 | `RunId` と入力参照を必須にする |
+| `RunArtifact` | 実行成果物の追跡スキーマ | P1 | `RunId` から入力、正規化、ポリシー、出力、監査ログを追跡する |
+| `AllowedGuideDocument` | RAG 許可文書 | P1 | 承認済み、版管理済み、抑制後情報だけを表す |
+| `RagIndexVersion` | RAG インデックス版 | P2 | 回答根拠と更新条件の追跡に使う |
 
 ## 8. 述語として表す候補
 
@@ -263,10 +283,14 @@ flowchart LR
 | `doesNotExposeSuppressedData report` | 抑制対象情報が公開用出力に現れない | P0 | プライバシー境界の一般化 |
 | `safeAggregateGroup group` | 集計単位が少人数部署または推測可能単位ではない | P0 | 少人数部署抑制 |
 | `isSuppressed group result` | 抑制対象グループの結果が抑制済みである | P0 | 少人数部署抑制 |
+| `hasReidentificationRisk group context` | 集計単位または回答が個人推測リスクを持つ | P0 | 差分推測、属性組合せ、自然言語表現 |
+| `CanAccessRawData role purpose scope approval time` | 抑制前データへのアクセスが許可される | P0 | Default Deny と許可条件 |
 | `inputUnchanged before after` | 原本入力が実行前後で変化しない | P1 | 原本保護 |
 | `hashUnchanged before after` | 入力ハッシュが実行前後で変化しない | P1 | 原本保護 |
 | `hasRunId artifact` | 成果物が `RunId` を持つ | P2 | 再現性 |
 | `hasInputReference artifact` | 成果物が入力参照を持つ | P2 | 再現性 |
+| `hasRunArtifactRefs artifact` | 成果物が入力、正規化、ポリシー、出力、監査参照を持つ | P1 | 成果物追跡性 |
+| `isAllowedGuideDocument doc` | RAG 対象が承認済み、版管理済み、抑制後情報である | P1 | ガイド AI 安全境界 |
 | `validAttendanceRow row` | 勤怠行が有効な時刻範囲を持つ | P2 | データ品質検査 |
 | `existsInMaster employee master` | 従業員がマスタに存在する | P1 | マスタ照合 |
 | `activeInPeriod employee period master` | 対象期間に従業員が在籍扱いである | P1 | マスタ照合 |
@@ -302,6 +326,7 @@ flowchart TD
 | `InvariantPrivacyBoundary` | 公開用出力には抑制対象の個人健康情報が含まれない | P0 |
 | `InvariantInternalPublicSeparation` | 抑制前内部データと公開用出力が混在しない | P0 |
 | `InvariantSmallGroupSuppression` | 少人数部署または個人推測リスクのある集計は表示可能な結果に含まれない | P0 |
+| `InvariantRawDataAccessDefaultDeny` | 抑制前データは許可条件を満たす主体以外に渡らない | P0 |
 | `InvariantSourceImmutability` | 原本 CSV または入力ハッシュは実行前後で変化しない | P1 |
 | `InvariantJoinSoundness` | 結合不可データは結合済みとして扱われない | P1 |
 | `InvariantMasterIssueGeneration` | 未登録、退職済み、部署不一致は確認対象 issue になる | P1 |
@@ -310,28 +335,46 @@ flowchart TD
 | `InvariantReadinessGate` | `blocked` 状態では完全レポートを生成しない | P2 |
 | `InvariantGuideSafety` | ガイド AI は抑制前データを直接回答対象にしない | P2 |
 
-## 10. 定理候補
+## 10. 定理命名規則
+
+Lean の定理名は、原則として動詞 + 目的語 + 補語または条件の形にする。lowerCamelCase を使い、主語を前置した `privacyFilter_hidesFatigueValue` のような形や、状態を主語にした `unsafeGroup_isSuppressed` のような形は避ける。
+
+例:
+
+| 避ける形 | 採用する形 |
+| --- | --- |
+| `privacyFilter_hidesFatigueValue` | `hideFatigueValueFromPublicReport` |
+| `unsafeGroup_isSuppressed` | `suppressUnsafeAggregateGroup` |
+| `sourcePreservation_keepsInputHash` | `preserveInputHashAfterSourceSave` |
+| `generatedArtifact_hasRunId` | `attachRunIdToGeneratedArtifact` |
+
+述語名は `doesNotExposeFatigueValue report`、`safeAggregateGroup group` のように性質を表してよい。ただし、定理名は検証する作用が読み取れる動詞始まりにする。
+
+## 11. 定理候補
 
 | 定理候補 | Lean 名候補 | 期待する意味 | 優先度 |
 | --- | --- | --- | --- |
-| 疲労値非表示定理 | `privacyFilter_hidesFatigueValue` | `PrivacyFilter` 後の `PublicReport` には個人疲労値が含まれない | P0 |
-| 睡眠時間非表示定理 | `privacyFilter_hidesSleepDuration` | `PrivacyFilter` 後の `PublicReport` には個人睡眠時間が含まれない | P0 |
-| 疲労コメント非表示定理 | `privacyFilter_hidesFatigueComment` | `PrivacyFilter` 後の `PublicReport` には個人疲労コメントが含まれない | P0 |
-| 抑制対象非表示定理 | `privacyFilter_hidesSuppressedData` | 抑制対象情報は公開用出力に現れない | P0 |
-| 型分離定理 | `publicReport_cannotContainInternalRecord` | `PublicReport` は `InternalRecord` を直接保持しない | P0 |
-| 少人数抑制定理 | `unsafeGroup_isSuppressed` | `safeAggregateGroup group = false` の集計は表示可能結果に含まれない | P0 |
-| 原本保護定理 | `sourcePreservation_keepsInputHash` | 原本保護処理を通した後も入力ハッシュは変化しない | P1 |
-| 結合不可定理 | `noEmployeeId_notJoinableWithPersonalAttendance` | 従業員 ID を持たない人件費データは個人勤怠と結合可能に分類されない | P1 |
-| 粒度不整合定理 | `incompatibleGrain_notJoinable` | 粒度が分析目的に対して不整合なデータは結合可能に分類されない | P1 |
-| 未登録従業員 issue 定理 | `missingMaster_generatesMasterIssue` | 未登録従業員を含む勤怠行は確認対象 issue を生成する | P1 |
-| 退職済み従業員 issue 定理 | `inactiveEmployee_generatesMasterIssue` | 対象期間に在籍していない従業員行は確認対象 issue を生成する | P1 |
-| 部署不一致 issue 定理 | `departmentMismatch_generatesMasterIssue` | 行の部署とマスタの部署が一致しない場合、確認対象 issue を生成する | P1 |
-| issue / report 分離定理 | `issueAndBusinessCheck_areSeparated` | データ品質 issue と業務確認ポイントは混在しない | P1 |
-| 成果物追跡定理 | `generatedArtifact_hasRunId` | 生成成果物は `RunId` を持つ | P2 |
-| readiness ゲート定理 | `blockedState_cannotGenerateFullReport` | `blocked` 状態から完全レポートは生成されない | P2 |
-| ガイド AI 安全定理 | `guideAnswer_usesOnlyPublicSources` | ガイド AI の回答対象は公開可能な根拠に限定される | P2 |
+| 疲労値非表示定理 | `hideFatigueValueFromPublicReport` | `PrivacyFilter` 後の `PublicReport` には個人疲労値が含まれない | P0 |
+| 睡眠時間非表示定理 | `hideSleepDurationFromPublicReport` | `PrivacyFilter` 後の `PublicReport` には個人睡眠時間が含まれない | P0 |
+| 疲労コメント非表示定理 | `hideFatigueCommentFromPublicReport` | `PrivacyFilter` 後の `PublicReport` には個人疲労コメントが含まれない | P0 |
+| 抑制対象非表示定理 | `hideSuppressedDataFromPublicReport` | 抑制対象情報は公開用出力に現れない | P0 |
+| 型分離定理 | `excludeInternalRecordFromPublicReport` | `PublicReport` は `InternalRecord` を直接保持しない | P0 |
+| 少人数抑制定理 | `suppressUnsafeAggregateGroup` | `safeAggregateGroup group = false` の集計は表示可能結果に含まれない | P0 |
+| 個人推測リスク抑制定理 | `suppressReidentificationRiskFromPublicReport` | 差分推測、属性組合せ、自然言語表現により個人推測可能な結果は公開用出力に含まれない | P0 |
+| 抑制前データアクセス制限定理 | `denyRawDataAccessWithoutAuthorization` | `¬ CanAccessRawData role purpose scope approval time` の場合、抑制前データは渡らない | P0 |
+| 原本保護定理 | `preserveInputHashAfterSourceSave` | 原本保護処理を通した後も入力ハッシュは変化しない | P1 |
+| 従業員 ID なし結合不可定理 | `rejectPersonalJoinWithoutEmployeeId` | 従業員 ID を持たない人件費データは個人勤怠と結合可能に分類されない | P1 |
+| 粒度不整合定理 | `rejectJoinForIncompatibleGrain` | 粒度が分析目的に対して不整合なデータは結合可能に分類されない | P1 |
+| 未登録従業員 issue 定理 | `generateMasterIssueForMissingEmployee` | 未登録従業員を含む勤怠行は確認対象 issue を生成する | P1 |
+| 退職済み従業員 issue 定理 | `generateMasterIssueForInactiveEmployee` | 対象期間に在籍していない従業員行は確認対象 issue を生成する | P1 |
+| 部署不一致 issue 定理 | `generateMasterIssueForDepartmentMismatch` | 行の部署とマスタの部署が一致しない場合、確認対象 issue を生成する | P1 |
+| issue / report 分離定理 | `separateIssueFromBusinessCheck` | データ品質 issue と業務確認ポイントは混在しない | P1 |
+| 成果物追跡定理 | `attachRunIdToGeneratedArtifact` | 生成成果物は `RunId` を持つ | P2 |
+| 成果物参照追跡定理 | `attachTraceRefsToRunArtifact` | `RunArtifact` は `InputRef`、`NormalizedRef`、`PolicyRef`、`OutputRef`、`AuditRef` を持つ | P1 |
+| readiness ゲート定理 | `blockFullReportWhenReadinessBlocked` | `blocked` 状態から完全レポートは生成されない | P2 |
+| ガイド AI 安全定理 | `restrictGuideAnswerToPublicSources` | ガイド AI の回答対象は承認済み、版管理済み、抑制後情報に限定される | P2 |
 
-## 11. 最初に Lean 化する範囲
+## 12. 最初に Lean 化する範囲
 
 最初の Lean 化は、プライバシー境界に絞る。
 
@@ -363,12 +406,14 @@ flowchart LR
 - `FatigueValue` を内部データとして表す。
 - `SleepDuration` を内部データとして表す。
 - `FatigueComment` を内部データとして表す。
+- 長時間労働、深夜勤務、休憩不足、連勤、有休取得不足などを `WorkRiskSignal` として表す。
+- `CanAccessRawData role purpose scope approval time` を、抑制前データ参照の許可述語として表す。
 - `InternalDataset` と `PublicReport` を型分離する。
 - `PrivacyFilter` を内部データから公開用出力への変換として表す。
 - `PrivacyFilter` 後の `PublicReport` に個人疲労値が含まれない性質を定義する。
 - 可能であれば、睡眠時間、疲労コメント、個人別ランキングも抑制対象として一般化する。
 
-## 12. Phase 1: プライバシー境界の詳細計画
+## 13. Phase 1: プライバシー境界の詳細計画
 
 ### 12.1 対象
 
@@ -381,6 +426,12 @@ Phase 1 では、次の概念だけを扱う。
 - `SensitiveField`
 - `InternalRecord`
 - `InternalDataset`
+- `AccessRole`
+- `AccessPurpose`
+- `AccessScope`
+- `Approval`
+- `AccessTime`
+- `CanAccessRawData`
 - `PublicField`
 - `PublicReport`
 - `PrivacyFilter`
@@ -398,7 +449,7 @@ Phase 1 では、次を扱わない。
 - PDF / Markdown レイアウト
 - 自然文の読みやすさ
 - LLM の回答品質
-- 少人数部署閾値の具体値
+- 少人数部署閾値の業務上の妥当性評価
 - 認証、権限、暗号化
 
 ### 12.3 Lean スケッチ
@@ -420,10 +471,140 @@ structure SleepDuration where
 structure FatigueComment where
   text : String
 
+inductive FatigueRiskCategory where
+  | none
+  | low
+  | medium
+  | high
+
+structure WorkRiskSignal where
+  scheduledWorkMinutes : Nat
+  actualWorkMinutes : Nat
+  overtimeMinutes : Nat
+  nightWorkMinutes : Nat
+  breakMinutes : Nat
+  breakShortage : Bool
+  consecutiveWorkDays : Nat
+  holidayTakenDays : Nat
+  paidLeaveTakenDays : Nat
+  absenceDays : Nat
+  fatigueRiskCategory : FatigueRiskCategory
+
 inductive SensitiveField where
   | fatigueValue : EmployeeId -> FatigueValue -> SensitiveField
   | sleepDuration : EmployeeId -> SleepDuration -> SensitiveField
   | fatigueComment : EmployeeId -> FatigueComment -> SensitiveField
+  | workRiskSignal : EmployeeId -> WorkRiskSignal -> SensitiveField
+
+inductive AccessRole where
+  | systemAdmin
+  | auditor
+  | dataProtectionOfficer
+  | limitedOperator
+  | generalAdmin
+  | guideAI
+  | ragIndex
+  | normalUser
+
+structure AccessPurpose where
+  description : String
+  ticketNumber : String
+
+structure AccessScope where
+  runId : String
+  datasetId : String
+
+structure Approval where
+  approved : Bool
+  approvalRef : String
+
+structure AccessTime where
+  withinLimit : Bool
+
+def allowedRawAccessRole : AccessRole -> Prop
+  | AccessRole.systemAdmin => True
+  | AccessRole.auditor => True
+  | AccessRole.dataProtectionOfficer => True
+  | AccessRole.limitedOperator => True
+  | _ => False
+
+def HasExplicitPurpose (purpose : AccessPurpose) : Prop :=
+  purpose.description ≠ "" ∧ purpose.ticketNumber ≠ ""
+
+def HasLimitedScope (scope : AccessScope) : Prop :=
+  scope.runId ≠ "" ∧ scope.datasetId ≠ ""
+
+def CanAccessRawData
+  (role : AccessRole)
+  (purpose : AccessPurpose)
+  (scope : AccessScope)
+  (approval : Approval)
+  (time : AccessTime) : Prop :=
+  allowedRawAccessRole role ∧
+  HasExplicitPurpose purpose ∧
+  HasLimitedScope scope ∧
+  approval.approved = true ∧
+  time.withinLimit = true
+
+inductive RawDataAccessDecision where
+  | granted
+  | denied
+
+def rawDataAccessDecision
+  (role : AccessRole)
+  (purpose : AccessPurpose)
+  (scope : AccessScope)
+  (approval : Approval)
+  (time : AccessTime) : RawDataAccessDecision :=
+  if CanAccessRawData role purpose scope approval time then
+    RawDataAccessDecision.granted
+  else
+    RawDataAccessDecision.denied
+
+structure RunId where value : String
+structure TenantId where value : String
+structure InputRef where
+  inputId : String
+  fileHashSha256 : String
+  schemaVersion : String
+
+structure NormalizedRef where
+  normalizedDatasetId : String
+  normalizationRuleVersion : String
+  columnMappingVersion : String
+
+structure PolicyRef where
+  suppressionPolicyVersion : String
+  inferenceThresholdK : Nat
+  ragIndexVersion : String
+  accessPolicyVersion : String
+
+structure OutputRef where
+  artifactId : String
+  outputHashSha256 : String
+
+structure AuditRef where
+  actorId : String
+  actorRole : String
+  executionReason : String
+  accessLogRef : String
+
+structure RunArtifact where
+  runId : RunId
+  tenantId : TenantId
+  inputRef : InputRef
+  normalizedRef : NormalizedRef
+  policyRef : PolicyRef
+  outputRef : OutputRef
+  auditRef : AuditRef
+
+structure AllowedGuideDocument where
+  guideDocumentId : String
+  documentVersion : String
+  sourceUpdatedAt : String
+  ragIndexVersion : String
+  privacySafe : Bool
+  approved : Bool
 
 structure InternalRecord where
   employeeId : EmployeeId
@@ -440,6 +621,19 @@ inductive PublicField where
 structure PublicReport where
   fields : List PublicField
 
+def hasRunArtifactRefs (artifact : RunArtifact) : Prop :=
+  artifact.inputRef.inputId ≠ "" ∧
+  artifact.normalizedRef.normalizedDatasetId ≠ "" ∧
+  artifact.policyRef.suppressionPolicyVersion ≠ "" ∧
+  artifact.outputRef.artifactId ≠ "" ∧
+  artifact.auditRef.accessLogRef ≠ ""
+
+def isAllowedGuideDocument (doc : AllowedGuideDocument) : Prop :=
+  doc.approved = true ∧
+  doc.documentVersion ≠ "" ∧
+  doc.ragIndexVersion ≠ "" ∧
+  doc.privacySafe = true
+
 -- 実装では、PublicField に SensitiveField を入れられない設計にする。
 def containsFatigueValue (report : PublicReport) : Prop :=
   False
@@ -449,7 +643,7 @@ def doesNotExposeFatigueValue (report : PublicReport) : Prop :=
 
 constant privacyFilter : InternalDataset -> PublicReport
 
-theorem privacyFilter_hidesFatigueValue
+theorem hideFatigueValueFromPublicReport
   (dataset : InternalDataset) :
   doesNotExposeFatigueValue (privacyFilter dataset) := by
   -- PublicReport の構造上、FatigueValue が表現できないことを証明する。
@@ -457,6 +651,19 @@ theorem privacyFilter_hidesFatigueValue
   unfold containsFatigueValue
   intro h
   exact h
+
+theorem denyRawDataAccessWithoutAuthorization
+  (role : AccessRole)
+  (purpose : AccessPurpose)
+  (scope : AccessScope)
+  (approval : Approval)
+  (time : AccessTime)
+  (h : ¬ CanAccessRawData role purpose scope approval time) :
+  rawDataAccessDecision role purpose scope approval time = RawDataAccessDecision.denied := by
+  unfold rawDataAccessDecision
+  split
+  · contradiction
+  · rfl
 
 end LaborLens.Privacy
 ```
@@ -471,7 +678,7 @@ Phase 1 の Lean 検証は、まず型レベルでの漏洩防止を扱う。つ
 2. 文字列レンダリング関数を別途モデル化し、内部データから直接文字列を生成できないことを検証する。
 3. Lean では型レベルの漏洩防止までを扱い、文字列レンダリング上の漏洩は実装テストと受け入れ基準で扱う。
 
-初期方針は 1 と 3 の併用とする。Lean では `PublicReport` を構造化し、実装側では画面、Markdown、JSON、CSV に個人疲労値、睡眠時間、疲労コメントが出ないことをテストする。
+初期方針は 1 と 3 の併用とする。Lean では `PublicReport` を構造化し、実装側では疑似 CLI 仕様と成果物テストにより、Markdown、JSON、CSV、PDF、UI 表示用 JSON に個人疲労値、睡眠時間、疲労コメントが出ないことを確認する。GUI 操作そのものは Lean の検証対象にしない。
 
 ### 12.5 Phase 1 の完了条件
 
@@ -482,25 +689,25 @@ Phase 1 は次を満たしたら完了とする。
 - `InternalDataset` と `PublicReport` が型として分離されている。
 - `PrivacyFilter` の入力と出力が定義されている。
 - `doesNotExposeFatigueValue` が定義されている。
-- `privacyFilter_hidesFatigueValue` が Lean 上で検証されている。
+- `hideFatigueValueFromPublicReport` が Lean 上で検証されている。
 - 睡眠時間、疲労コメントへの拡張方針が記録されている。
 - 本番実装側の抑制処理 API が Lean 仕様に対応している。
 
-## 13. Phase 計画
+## 14. Phase 計画
 
 | Phase | 目的 | Lean 成果物 | 本番実装との関係 | 完了条件 |
 | --- | --- | --- | --- | --- |
 | Phase 0 | 本番実装前の Lean 検証方針を固定する | この文書 | まだ実装しない | コアロジック、検証ゲート、優先順位が明記されている |
-| Phase 1 | プライバシー境界を検証する | `Privacy.lean` | 抑制処理、公開用レポート生成の前提になる | 疲労値非表示定理が通る |
-| Phase 2 | 少人数部署抑制を検証する | `AggregationPrivacy.lean` | 集計表示、抑制済みレポートの前提になる | 少人数抑制定理が通る |
-| Phase 3 | 原本保護を検証する | `SourcePreservation.lean` | CSV 取込、再確認、入力ハッシュ記録の前提になる | 原本保護定理が通る |
-| Phase 4 | 粒度判定と結合可否を検証する | `Joinability.lean` | 人件費粒度レポート、結合処理の前提になる | 結合不可定理が通る |
-| Phase 5 | 従業員マスタ照合を検証する | `MasterCheck.lean` | `master_issue` 出力の前提になる | 未登録従業員 issue 定理が通る |
-| Phase 6 | issue / report 分類を検証する | `IssueReportSeparation.lean` | `issues.csv` と業務レポートの分離に使う | issue / report 分離定理が通る |
-| Phase 7 | 成果物追跡性を検証する | `ArtifactTraceability.lean` | `run_summary.json`、各レポート成果物の前提になる | 成果物追跡定理が通る |
-| Phase 8 | ガイド AI の安全境界を検証する | `GuideSafety.lean` | RAG 対象、回答根拠、安全制約に使う | 公開可能根拠限定の定理候補が定義される |
+| Phase 1 | プライバシー境界を検証する | `Privacy.lean` | 抑制処理、公開用レポート生成の前提になる | `hideFatigueValueFromPublicReport` が通る |
+| Phase 2 | 少人数部署抑制を検証する | `AggregationPrivacy.lean` | 集計表示、抑制済みレポートの前提になる | `suppressUnsafeAggregateGroup` が通る |
+| Phase 3 | 原本保護を検証する | `SourcePreservation.lean` | CSV 取込、再確認、入力ハッシュ記録の前提になる | `preserveInputHashAfterSourceSave` が通る |
+| Phase 4 | 粒度判定と結合可否を検証する | `Joinability.lean` | 人件費粒度レポート、結合処理の前提になる | `rejectPersonalJoinWithoutEmployeeId` が通る |
+| Phase 5 | 従業員マスタ照合を検証する | `MasterCheck.lean` | `master_issue` 出力の前提になる | `generateMasterIssueForMissingEmployee` が通る |
+| Phase 6 | issue / report 分類を検証する | `IssueReportSeparation.lean` | `issues.csv` と業務レポートの分離に使う | `separateIssueFromBusinessCheck` が通る |
+| Phase 7 | 成果物追跡性を検証する | `ArtifactTraceability.lean` | `run_summary.json`、各レポート成果物の前提になる | `attachRunIdToGeneratedArtifact` が通る |
+| Phase 8 | ガイド AI の安全境界を検証する | `GuideSafety.lean` | RAG 対象、回答根拠、安全制約に使う | `restrictGuideAnswerToPublicSources` が定義される |
 
-## 14. 主仕様との対応
+## 15. 主仕様との対応
 
 | 主仕様の項目 | Lean 仕様化の対象 | 定理候補 | 優先度 |
 | --- | --- | --- | --- |
@@ -514,23 +721,26 @@ Phase 1 は次を満たしたら完了とする。
 | 未登録従業員を issue として出力する | `existsInMaster employee master` | 未登録従業員 issue 定理 | P1 |
 | データ品質 issue と業務推奨を分離する | `IssueCategory`, `ReportItem`, `separateIssueAndReport` | issue / report 分離定理 | P1 |
 | すべての成果物が `RunId` を持つ | `hasRunId artifact` | 成果物追跡定理 | P2 |
-| ガイド AI が抑制対象情報を回答しない | `guideUsesOnlyPublicSources answer sources` | ガイド AI 安全定理 | P2 |
+| `RunId` から入力、正規化、ポリシー、出力、監査ログを追跡する | `RunArtifact`, `hasRunArtifactRefs artifact` | 成果物参照追跡定理 | P1 |
+| ガイド AI が抑制対象情報を回答しない | `guideUsesOnlyPublicSources answer sources`, `isAllowedGuideDocument doc` | ガイド AI 安全定理 | P2 |
 
-## 15. 実装契約への落とし込み
+## 16. 実装契約への落とし込み
 
 Lean 検証済みの定理は、そのまま本番コードの関数名やモジュール構造を強制するものではない。ただし、本番実装は Lean で検証した性質を破ってはならない。
 
 | Lean 検証対象 | 実装契約 | テストへの引き継ぎ |
 | --- | --- | --- |
-| `privacyFilter_hidesFatigueValue` | 公開用レポート生成 API は `PrivacyFilteredReport` のみを返す。内部疲労値を直接返さない | 個人疲労値、睡眠時間、疲労コメントが画面、Markdown、JSON、CSV に出ないことを確認する |
-| `unsafeGroup_isSuppressed` | 集計結果は表示前に `safeAggregateGroup` 相当の判定を通す | 少人数部署サンプルで非表示、伏せ字、抑制済みになることを確認する |
-| `sourcePreservation_keepsInputHash` | 原本保存後の処理は原本ファイルを更新しない。再生成可能データのみ更新する | 実行前後の原本 CSV ハッシュ一致を確認する |
-| `noEmployeeId_notJoinableWithPersonalAttendance` | 従業員 ID のない人件費データは個人勤怠と結合しない | 従業員 ID なし人件費データが結合不可として出力されることを確認する |
-| `missingMaster_generatesMasterIssue` | マスタに存在しない従業員 ID は `master_issue` として出力する | 未登録従業員を含むサンプルで issue が出ることを確認する |
-| `issueAndBusinessCheck_areSeparated` | `issues.csv` と業務確認レポートの型、出力先、分類を分ける | issue が業務推奨文として混入しないことを確認する |
-| `generatedArtifact_hasRunId` | すべての成果物に `RunId` と入力参照を含める | 各成果物で `RunId`、入力ハッシュ、実行設定参照を確認する |
+| `hideFatigueValueFromPublicReport` | 公開用レポート生成 API は `PrivacyFilteredReport` のみを返す。内部疲労値を直接返さない | 個人疲労値、睡眠時間、疲労コメントが疑似 CLI 生成成果物、Markdown、JSON、CSV、PDF、UI 表示用 JSON に出ないことを確認する |
+| `suppressUnsafeAggregateGroup` | 集計結果は表示前に `safeAggregateGroup` 相当の判定を通す | 少人数部署サンプルで非表示、伏せ字、抑制済みになることを確認する |
+| `preserveInputHashAfterSourceSave` | 原本保存後の処理は原本ファイルを更新しない。再生成可能データのみ更新する | 実行前後の原本 CSV ハッシュ一致を確認する |
+| `rejectPersonalJoinWithoutEmployeeId` | 従業員 ID のない人件費データは個人勤怠と結合しない | 従業員 ID なし人件費データが結合不可として出力されることを確認する |
+| `generateMasterIssueForMissingEmployee` | マスタに存在しない従業員 ID は `master_issue` として出力する | 未登録従業員を含むサンプルで issue が出ることを確認する |
+| `separateIssueFromBusinessCheck` | `issues.csv` と業務確認レポートの型、出力先、分類を分ける | issue が業務推奨文として混入しないことを確認する |
+| `attachRunIdToGeneratedArtifact` | すべての成果物に `RunId` を含める | 各成果物で `RunId` を確認する |
+| `attachTraceRefsToRunArtifact` | `RunArtifact` に `InputRef`、`NormalizedRef`、`PolicyRef`、`OutputRef`、`AuditRef` を含める | `run_summary.json` と `artifact_manifest.json` から入力、正規化結果、抑制ポリシー、出力、監査ログを追跡できることを確認する |
+| `restrictGuideAnswerToPublicSources` | ガイド AI は承認済み、版管理済み、抑制後情報だけを検索対象にする | 未承認文書、抑制前データ、個人別データ、監査ログ、下書き文書、Slack、メール、チケット原文を検索対象に入れようとした場合に拒否されることを確認する |
 
-## 16. Lean ディレクトリ構成案
+## 17. Lean ディレクトリ構成案
 
 ```text
 lean/
@@ -564,7 +774,7 @@ lean/
 - 最初は Phase 1 の `Privacy.lean` と `PrivacyTheorems.lean` だけを作成してよい。
 - 本番実装の言語やフレームワークとは独立させる。
 
-## 17. Lean 検証レビュー手順
+## 18. Lean 検証レビュー手順
 
 コアロジックの本番実装は、次の順で進める。
 
@@ -587,11 +797,11 @@ lean/
 - Lean で扱わない仮定が明示されているか。
 - 本番実装側のテストが Lean 仕様に対応しているか。
 
-## 18. 初期スコープ外
+## 19. 初期スコープ外
 
 次の内容は本番品質には重要だが、初期の Lean 検証対象には含めない。
 
-- UI 表示順
+- UI 表示順。店舗、部署、雇用区分の `display_order` は UI・帳票仕様で扱い、Lean のブロッカーにはしない。
 - 画面レイアウト
 - PDF / Markdown の見た目
 - CSV パーサの詳細実装
@@ -603,13 +813,13 @@ lean/
 - 表示文言の細部
 - 認証、認可、暗号化、ログマスキングの具体実装
 - Ollama モデル選定
-- RAG インデックスの更新方式
+- RAG インデックスの保持世代数と差分更新方式
 
 これらは、Lean ではなく次の文書で扱う。
 
 | 対象外項目 | 扱う文書 |
 | --- | --- |
-| UI 表示順、画面レイアウト | `EXTERNAL-DESIGN.md` |
+| UI 表示順、画面レイアウト | `EXTERNAL-DESIGN.md`, `DATA-DESIGN.md` |
 | PDF / Markdown の見た目 | `EXTERNAL-DESIGN.md`, `DATA-DESIGN.md` |
 | CSV パーサ、正規化データ、ローカル DB | `DATA-DESIGN.md` |
 | ローカルサーバー、ジョブ、UI、DB 構成 | `ARCHITECTURE.md` |
@@ -618,30 +828,34 @@ lean/
 | 自然文品質、表示文言 | `EXTERNAL-DESIGN.md`, `TEST-PLAN.md` |
 | ガイド AI のモデル選定 | `ARCHITECTURE.md`, `TEST-PLAN.md` |
 
-## 19. 未決事項
+## 20. 未決事項
 
-| ID | 未決事項 | Lean への影響 | 決定先 |
+現時点で、Lean 仕様化に必要な主要未決事項はない。運用手順、保持期間、差分更新方式などの実装・運用詳細は `OPERATIONS.md` または `TEST-PLAN.md` で扱う。
+
+次の事項は決定済みであり、Lean 側では `BUSINESS-RULES.md` の値を前提または実行設定として受け取る。
+
+| ID | 決定事項 | Lean への反映 | 参照先 |
 | --- | --- | --- | --- |
-| LEAN-OPEN-001 | 少人数部署とみなす人数の閾値 | `safeAggregateGroup` の具体条件が決まる | `BUSINESS-RULES.md` |
-| LEAN-OPEN-002 | 個人推測リスクの定義 | 少人数部署以外の抑制条件が決まる | `BUSINESS-RULES.md`, `OPERATIONS.md` |
-| LEAN-OPEN-003 | 疲労関連データの内部型範囲 | `SensitiveField` の範囲が決まる | `GLOSSARY.md`, `DATA-DESIGN.md` |
-| LEAN-OPEN-004 | issue code の体系 | `IssueCode` と定理名の粒度が決まる | `BUSINESS-RULES.md`, `ACCEPTANCE-CRITERIA.md` |
-| LEAN-OPEN-005 | `RunId` と入力参照の成果物スキーマ | 成果物追跡定理の対象フィールドが決まる | `DATA-DESIGN.md` |
-| LEAN-OPEN-006 | 抑制前データへのアクセス制御 | Lean で型分離する範囲と運用で守る範囲が決まる | `ARCHITECTURE.md`, `OPERATIONS.md` |
-| LEAN-OPEN-007 | ガイド AI の検索対象文書 | `guideUsesOnlyPublicSources` の対象が決まる | `DATA-DESIGN.md`, `ARCHITECTURE.md` |
-| LEAN-OPEN-008 | レポート出力形式 | `PublicReport` の実装対応先が決まる | `EXTERNAL-DESIGN.md`, `DATA-DESIGN.md` |
+| LEAN-OPEN-001 | 少人数部署とみなす範囲 | 有効データ数 10 人未満を `safeAggregateGroup = false` の候補にし、10 人以上 30 人未満は注意部署として表示制限の対象にする。 | `BUSINESS-RULES.md` |
+| LEAN-OPEN-002 | 個人推測リスクの定義 | 少人数セル、差分推測、属性組合せ、自然言語表現により個人または `k` 未満の集団を推測できる場合は抑制対象にする。 | `BUSINESS-RULES.md`, `ACCEPTANCE-CRITERIA.md` |
+| LEAN-OPEN-003 | 疲労関連データの内部型範囲 | `SensitiveField` は医学的診断ではなく、長時間労働、深夜勤務、休憩不足、連勤、有休取得不足などの労務リスク指標を内部型として扱う。病名、診断名、面談内容、理由詳細、自由記述原文は対象外にする。 | `GLOSSARY.md`, `DATA-DESIGN.md` |
+| LEAN-OPEN-004 | issue code の体系 | `IssueCode` は `BUSINESS-RULES.md` の安定コード体系を入力分類として扱い、定理名はコード文字列ではなく安全性・分類性質に対応させる。 | `BUSINESS-RULES.md`, `ACCEPTANCE-CRITERIA.md` |
+| LEAN-OPEN-005 | `RunId` と入力参照の成果物スキーマ | `RunArtifact` は `RunId`、`TenantId`、`InputRef`、`NormalizedRef`、`PolicyRef`、`OutputRef`、`AuditRef` を持つ。 | `DATA-DESIGN.md` |
+| LEAN-OPEN-006 | 抑制前データへのアクセス制御 | `CanAccessRawData role purpose scope approval time` を許可述語とし、条件を満たさない場合は `denyRawDataAccessWithoutAuthorization` の対象にする。 | `ARCHITECTURE.md`, `BUSINESS-RULES.md`, `DATA-DESIGN.md` |
+| LEAN-OPEN-007 | ガイド AI の検索対象文書 | `AllowedGuideDocument` は承認済み、版管理済み、抑制後情報だけを表し、未承認文書、抑制前データ、個人別データ、監査ログ、下書き文書、Slack、メール、チケット原文を除外する。 | `DATA-DESIGN.md`, `ARCHITECTURE.md` |
+| LEAN-OPEN-008 | レポート出力形式 | `PublicReport` は形式別の見た目ではなく、Markdown、CSV、JSON、PDF、UI JSON の全出力が同じ抑制済み公開データから生成される性質を扱う。 | `DATA-DESIGN.md`, `ARCHITECTURE.md` |
 
-## 20. 次のアクション
+## 21. 次のアクション
 
 1. この文書を `docs/product/LEAN-SPEC-PLANNING.md` として採用する。
 2. Phase 1 の Lean ファイルを作成する。
 3. `FatigueValue`、`PublicReport`、`PrivacyFilter`、`doesNotExposeFatigueValue` を最小モデル化する。
-4. `privacyFilter_hidesFatigueValue` を Lean 上で通す。
+4. `hideFatigueValueFromPublicReport` を Lean 上で通す。
 5. 本番実装側のプライバシー抑制 API に実装契約を渡す。
 6. `ACCEPTANCE-CRITERIA.md` に個人疲労値、睡眠時間、疲労コメントが公開用出力に出ないことの受け入れ基準を追加する。
 7. Phase 2 として少人数部署抑制に進む。
 
-## 21. 完成判定
+## 22. 完成判定
 
 この文書の初版は、次を満たせば完成とする。
 
