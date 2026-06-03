@@ -1,0 +1,91 @@
+{
+  "contract_version": "laborlens.public_report.v1",
+  "artifact_manifest": {
+    "run_id": "run-smoke-001",
+    "contract_version": "laborlens.public_report.v1",
+    "input_traces": [
+      {
+        "dataset_id": "attendance_by_employee",
+        "source_ref": "fixtures/internal/attendance.csv",
+        "fingerprint": "sha256:smoke-attendance",
+        "record_count": 1
+      },
+      {
+        "dataset_id": "fatigue_by_employee",
+        "source_ref": "fixtures/internal/fatigue.csv",
+        "fingerprint": "sha256:smoke-fatigue",
+        "record_count": 1
+      }
+    ],
+    "policy_trace": {
+      "policy_id": "privacy-safety-v1",
+      "version": "2026-06-03",
+      "safety_boundary": "公開 artifact 生成前に個人の健康関連詳細を抑制する"
+    },
+    "output_traces": [
+      {
+        "artifact_name": "artifact_manifest",
+        "artifact_kind": "json",
+        "stable_path": "artifact_manifest.json",
+        "content_schema": "laborlens.artifact_manifest.v1"
+      },
+      {
+        "artifact_name": "run_summary",
+        "artifact_kind": "json",
+        "stable_path": "run_summary.json",
+        "content_schema": "laborlens.run_summary.v1"
+      },
+      {
+        "artifact_name": "issues",
+        "artifact_kind": "json",
+        "stable_path": "issues.json",
+        "content_schema": "laborlens.issues.v1"
+      },
+      {
+        "artifact_name": "profile_report",
+        "artifact_kind": "json",
+        "stable_path": "profile_report.json",
+        "content_schema": "laborlens.profile_report.v1"
+      }
+    ]
+  },
+  "run_summary": {
+    "run_id": "run-smoke-001",
+    "employee_count": 1,
+    "profile_count": 1,
+    "suppressed_category_count": 1,
+    "suppressed_field_count": 3,
+    "issue_count": 1,
+    "policy_id": "privacy-safety-v1",
+    "policy_version": "2026-06-03"
+  },
+  "issues": [
+    {
+      "issue_id": "issue:personal_health_detail_suppressed",
+      "severity": "info",
+      "message": "個人の健康関連詳細は公開レポート生成前に抑制された。",
+      "suppression_code": "PERSONAL_HEALTH_DETAIL_SUPPRESSED"
+    }
+  ],
+  "profile_report": {
+    "run_id": "run-smoke-001",
+    "profiles": [
+      {
+        "profile_id": "group:operations",
+        "group_key": "operations",
+        "employee_count": 1,
+        "attendance_days_observed": 20,
+        "health_detail_status": "suppressed"
+      }
+    ],
+    "suppression_summary": [
+      {
+        "suppression_code": "PERSONAL_HEALTH_DETAIL_SUPPRESSED",
+        "category": "personal_health_detail",
+        "reason": "個人の健康関連詳細は公開レポートの対象外である。",
+        "affected_record_count": 1,
+        "suppressed_field_count": 3
+      }
+    ]
+  }
+}

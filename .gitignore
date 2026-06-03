@@ -1,6 +1,9 @@
 # Rust
 /target/
 
+# Lean / Lake build outputs
+/lean/.lake/
+
 # Node / frontend tooling
 /node_modules/
 /dist/
