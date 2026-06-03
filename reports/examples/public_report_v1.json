@@ -8,21 +8,27 @@
         "dataset_id": "attendance_by_employee",
         "source_ref": "fixtures/internal/attendance.csv",
         "fingerprint": "sha256:smoke-attendance",
-        "record_count": 1
+        "record_count": 10
       },
       {
         "dataset_id": "fatigue_by_employee",
         "source_ref": "fixtures/internal/fatigue.csv",
         "fingerprint": "sha256:smoke-fatigue",
-        "record_count": 1
+        "record_count": 10
       }
     ],
     "policy_trace": {
       "policy_id": "privacy-safety-v1",
       "version": "2026-06-03",
-      "safety_boundary": "公開 artifact 生成前に個人の健康関連詳細を抑制する"
+      "safety_boundary": "公開 artifact 生成前に個人の健康関連詳細と少人数集団を抑制する"
     },
     "output_traces": [
+      {
+        "artifact_name": "public_report_model",
+        "artifact_kind": "json",
+        "stable_path": "public_report_model.json",
+        "content_schema": "laborlens.public_report.v1"
+      },
       {
         "artifact_name": "artifact_manifest",
         "artifact_kind": "json",
@@ -37,21 +43,21 @@
       },
       {
         "artifact_name": "issues",
-        "artifact_kind": "json",
-        "stable_path": "issues.json",
-        "content_schema": "laborlens.issues.v1"
+        "artifact_kind": "csv",
+        "stable_path": "issues.csv",
+        "content_schema": "laborlens.issues_csv.v1"
       },
       {
-        "artifact_name": "profile_report",
-        "artifact_kind": "json",
-        "stable_path": "profile_report.json",
-        "content_schema": "laborlens.profile_report.v1"
+        "artifact_name": "privacy_suppressions",
+        "artifact_kind": "csv",
+        "stable_path": "privacy_suppressions.csv",
+        "content_schema": "laborlens.privacy_suppressions_csv.v1"
       }
     ]
   },
   "run_summary": {
     "run_id": "run-smoke-001",
-    "employee_count": 1,
+    "employee_count": 10,
     "profile_count": 1,
     "suppressed_category_count": 1,
     "suppressed_field_count": 3,
@@ -73,8 +79,8 @@
       {
         "profile_id": "group:operations",
         "group_key": "operations",
-        "employee_count": 1,
-        "attendance_days_observed": 20,
+        "employee_count": 10,
+        "attendance_days_observed": 200,
         "health_detail_status": "suppressed"
       }
     ],

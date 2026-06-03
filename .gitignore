@@ -23,6 +23,7 @@
 
 # Generated reports and temporary outputs
 /reports/generated/
+/fixtures/scale/generated/
 /tmp/
 /temp/
 

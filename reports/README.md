@@ -17,6 +17,7 @@ Pike の Python report app は、Rust monolith が出力する抑制済み公開
 - `public_report_model.json`
 - `report.md`
 - `issues.csv`
+- `privacy_suppressions.csv`
 - `artifact_manifest.json`
 
 Python は、原本 CSV の再読込、core analysis の再計算、privacy/safety context を通っていない内部 dataset へのアクセスを行ってはならない。
@@ -48,3 +49,5 @@ cargo run -p laborlens-rust --quiet | python reports/report_app/main.py --input 
 ## 将来の renderer hook
 
 PDF、HTML、print layout、chart renderer は初期スコープ外である。Markdown/public-contract boundary の後段に renderer hook として追加し、同じ検証済み public JSON または Markdown output を消費させる。raw CSV や DB data に直接接続してはならない。
+
+renderer は任意の `readiness` と `monthly_summaries` field が存在する場合だけ追加 section を描画する。これらも抑制済み public JSON から読む。

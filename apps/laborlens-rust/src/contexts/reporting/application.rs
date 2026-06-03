@@ -67,6 +67,12 @@ fn build_issues(public_report: &PublicReport) -> Vec<PublicIssue> {
 fn output_traces() -> Vec<OutputTrace> {
     vec![
         OutputTrace {
+            artifact_name: "public_report_model".to_string(),
+            artifact_kind: "json".to_string(),
+            stable_path: "public_report_model.json".to_string(),
+            content_schema: PUBLIC_REPORT_CONTRACT_VERSION.to_string(),
+        },
+        OutputTrace {
             artifact_name: "artifact_manifest".to_string(),
             artifact_kind: "json".to_string(),
             stable_path: "artifact_manifest.json".to_string(),
@@ -80,15 +86,15 @@ fn output_traces() -> Vec<OutputTrace> {
         },
         OutputTrace {
             artifact_name: "issues".to_string(),
-            artifact_kind: "json".to_string(),
-            stable_path: "issues.json".to_string(),
-            content_schema: "laborlens.issues.v1".to_string(),
+            artifact_kind: "csv".to_string(),
+            stable_path: "issues.csv".to_string(),
+            content_schema: "laborlens.issues_csv.v1".to_string(),
         },
         OutputTrace {
-            artifact_name: "profile_report".to_string(),
-            artifact_kind: "json".to_string(),
-            stable_path: "profile_report.json".to_string(),
-            content_schema: "laborlens.profile_report.v1".to_string(),
+            artifact_name: "privacy_suppressions".to_string(),
+            artifact_kind: "csv".to_string(),
+            stable_path: "privacy_suppressions.csv".to_string(),
+            content_schema: "laborlens.privacy_suppressions_csv.v1".to_string(),
         },
     ]
 }
@@ -124,17 +130,31 @@ mod tests {
                 policy_id: "privacy-safety-v1".to_string(),
                 version: "2026-06-03".to_string(),
             },
-            employees: vec![InternalEmployeeProfile {
-                employee_ref: "EMP-PRIVATE-001".to_string(),
-                group_key: "operations".to_string(),
-                attendance_days_observed: 21,
-                fatigue_value: Some(97),
-                sleep_duration_hours: Some(4.25),
-                fatigue_comment: Some(
-                    "raw fatigue marker comment should never reach Pike".to_string(),
-                ),
-            }],
+            employees: sample_profiles_for_safe_group(),
         }
+    }
+
+    fn sample_profiles_for_safe_group() -> Vec<InternalEmployeeProfile> {
+        let mut employees = Vec::new();
+        employees.push(InternalEmployeeProfile {
+            employee_ref: "EMP-PRIVATE-001".to_string(),
+            group_key: "operations".to_string(),
+            attendance_days_observed: 21,
+            fatigue_value: Some(97),
+            sleep_duration_hours: Some(4.25),
+            fatigue_comment: Some(
+                "raw fatigue marker comment should never reach Pike".to_string(),
+            ),
+        });
+        employees.extend((2..=10).map(|index| InternalEmployeeProfile {
+            employee_ref: format!("EMP-PRIVATE-{index:03}"),
+            group_key: "operations".to_string(),
+            attendance_days_observed: 20,
+            fatigue_value: None,
+            sleep_duration_hours: None,
+            fatigue_comment: None,
+        }));
+        employees
     }
 
     #[test]
@@ -184,7 +204,7 @@ mod tests {
             .artifact_manifest
             .output_traces
             .iter()
-            .any(|trace| trace.artifact_name == "profile_report"));
+            .any(|trace| trace.stable_path == "privacy_suppressions.csv"));
     }
 
     #[test]

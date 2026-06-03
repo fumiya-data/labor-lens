@@ -1,0 +1,48 @@
+<!doctype html>
+<html lang="ja">
+  <head>
+    <meta charset="utf-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1" />
+    <title>LaborLens local UI</title>
+    <link rel="stylesheet" href="./src/styles.css" />
+  </head>
+  <body>
+    <main class="shell">
+      <header class="toolbar">
+        <h1>LaborLens local UI</h1>
+        <span id="run-status" class="status" aria-live="polite">未実行</span>
+      </header>
+
+      <section class="panel" aria-labelledby="run-setup-heading">
+        <h2 id="run-setup-heading">run setup</h2>
+        <label>
+          employees CSV
+          <input id="employees-csv" type="file" accept=".csv,text/csv" />
+        </label>
+        <label>
+          attendance CSV
+          <input id="attendance-csv" type="file" accept=".csv,text/csv" />
+        </label>
+        <button id="start-run" type="button">run 開始</button>
+      </section>
+
+      <section class="panel" aria-labelledby="progress-heading">
+        <h2 id="progress-heading">progress</h2>
+        <progress id="run-progress" max="100" value="0"></progress>
+        <p id="progress-message">CSV を選択してください。</p>
+      </section>
+
+      <section class="panel" aria-labelledby="artifact-heading">
+        <h2 id="artifact-heading">artifact list</h2>
+        <ul id="artifact-list"></ul>
+      </section>
+
+      <section class="panel report" aria-labelledby="report-heading">
+        <h2 id="report-heading">Markdown report</h2>
+        <pre id="report-viewer"></pre>
+      </section>
+    </main>
+
+    <script type="module" src="./src/app.js"></script>
+  </body>
+</html>

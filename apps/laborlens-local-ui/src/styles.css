@@ -1,0 +1,64 @@
+body {
+  margin: 0;
+  font-family: "Segoe UI", sans-serif;
+  background: #f5f6f8;
+  color: #1f2933;
+}
+
+.shell {
+  max-width: 1040px;
+  margin: 0 auto;
+  padding: 24px;
+  display: grid;
+  gap: 16px;
+}
+
+.toolbar {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+}
+
+.toolbar h1 {
+  margin: 0;
+  font-size: 24px;
+}
+
+.status {
+  font-weight: 600;
+}
+
+.panel {
+  background: #ffffff;
+  border: 1px solid #d9dee7;
+  border-radius: 8px;
+  padding: 16px;
+  display: grid;
+  gap: 12px;
+}
+
+.panel h2 {
+  margin: 0;
+  font-size: 16px;
+}
+
+label {
+  display: grid;
+  gap: 6px;
+}
+
+button {
+  width: fit-content;
+  padding: 8px 14px;
+}
+
+progress {
+  width: 100%;
+}
+
+.report pre {
+  min-height: 240px;
+  margin: 0;
+  overflow: auto;
+  white-space: pre-wrap;
+}

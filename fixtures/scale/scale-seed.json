@@ -1,0 +1,7 @@
+{
+  "seed": 20260603,
+  "employee_count": 10000,
+  "years": 3,
+  "departments": ["operations", "sales", "backoffice"],
+  "note": "tools/generate-scale-fixture.ps1 で固定 seed の合成 CSV を生成する。"
+}

@@ -7,6 +7,8 @@ use crate::shared::RunId;
 use serde::{Deserialize, Serialize};
 
 pub const PERSONAL_HEALTH_DETAIL_SUPPRESSION_CODE: &str = "PERSONAL_HEALTH_DETAIL_SUPPRESSED";
+pub const SMALL_GROUP_SUPPRESSION_CODE: &str = "SMALL_GROUP_SUPPRESSED";
+pub const MINIMUM_SAFE_AGGREGATE_GROUP_SIZE: usize = 10;
 
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 pub struct InputTrace {
@@ -63,7 +65,8 @@ impl From<PrivacyPolicy> for PolicyTrace {
         Self {
             policy_id: policy.policy_id,
             version: policy.version,
-            safety_boundary: "公開 artifact 生成前に個人の健康関連詳細を抑制する".to_string(),
+            safety_boundary:
+                "公開 artifact 生成前に個人の健康関連詳細と少人数集団を抑制する".to_string(),
         }
     }
 }

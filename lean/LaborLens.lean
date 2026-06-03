@@ -4,7 +4,11 @@ import LaborLens.Core.Artifact
 import LaborLens.Spec.Privacy
 import LaborLens.Spec.AggregationPrivacy
 import LaborLens.Spec.SourcePreservation
+import LaborLens.Spec.Workforce
+import LaborLens.Spec.GuideSafety
 import LaborLens.Theorems.PrivacyTheorems
 import LaborLens.Theorems.AggregationPrivacyTheorems
 import LaborLens.Theorems.ArtifactTraceabilityTheorems
 import LaborLens.Theorems.SourcePreservationTheorems
+import LaborLens.Theorems.WorkforceTheorems
+import LaborLens.Theorems.GuideSafetyTheorems

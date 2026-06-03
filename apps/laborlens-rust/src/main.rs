@@ -66,26 +66,40 @@ fn smoke_internal_dataset() -> InternalWorkforceDataset {
                 dataset_id: "attendance_by_employee".to_string(),
                 source_ref: "fixtures/internal/attendance.csv".to_string(),
                 fingerprint: "sha256:smoke-attendance".to_string(),
-                record_count: 1,
+                record_count: 10,
             },
             InputTrace {
                 dataset_id: "fatigue_by_employee".to_string(),
                 source_ref: "fixtures/internal/fatigue.csv".to_string(),
                 fingerprint: "sha256:smoke-fatigue".to_string(),
-                record_count: 1,
+                record_count: 10,
             },
         ],
         policy: PrivacyPolicy {
             policy_id: "privacy-safety-v1".to_string(),
             version: "2026-06-03".to_string(),
         },
-        employees: vec![InternalEmployeeProfile {
-            employee_ref: "EMP-SMOKE-001".to_string(),
-            group_key: "operations".to_string(),
-            attendance_days_observed: 20,
-            fatigue_value: Some(88),
-            sleep_duration_hours: Some(5.5),
-            fatigue_comment: Some("internal smoke fatigue note".to_string()),
-        }],
+        employees: smoke_profiles_for_safe_group(),
     }
+}
+
+fn smoke_profiles_for_safe_group() -> Vec<InternalEmployeeProfile> {
+    let mut employees = Vec::new();
+    employees.push(InternalEmployeeProfile {
+        employee_ref: "EMP-SMOKE-001".to_string(),
+        group_key: "operations".to_string(),
+        attendance_days_observed: 20,
+        fatigue_value: Some(88),
+        sleep_duration_hours: Some(5.5),
+        fatigue_comment: Some("internal smoke fatigue note".to_string()),
+    });
+    employees.extend((2..=10).map(|index| InternalEmployeeProfile {
+        employee_ref: format!("EMP-SMOKE-{index:03}"),
+        group_key: "operations".to_string(),
+        attendance_days_observed: 20,
+        fatigue_value: None,
+        sleep_duration_hours: None,
+        fatigue_comment: None,
+    }));
+    employees
 }

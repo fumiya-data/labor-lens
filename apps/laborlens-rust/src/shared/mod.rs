@@ -8,6 +8,7 @@ use serde::{Deserialize, Serialize};
 use std::fmt;
 
 pub mod db;
+pub mod ops;
 
 #[derive(Debug, Clone, PartialEq, Eq, Hash, Serialize, Deserialize)]
 #[serde(transparent)]

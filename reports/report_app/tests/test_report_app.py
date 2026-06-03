@@ -41,7 +41,39 @@ class ReportAppTests(unittest.TestCase):
         self.assertIn("run-smoke-001", markdown)
         self.assertIn("PERSONAL_HEALTH_DETAIL_SUPPRESSED", markdown)
         self.assertIn("group:operations", markdown)
-        self.assertIn("| operations | 1 | 20 | suppressed |", markdown)
+        self.assertIn("| operations | 10 | 200 | suppressed |", markdown)
+
+    def test_renderer_includes_optional_readiness_and_monthly_summaries(self):
+        report = load_public_report(FIXTURE_PATH)
+        report["readiness"] = {
+            "status": "partial",
+            "joinable_employee_attendance": True,
+            "joinable_labor_cost_attendance": False,
+            "business_checks": [
+                {
+                    "check_id": "business_check:joinability",
+                    "kind": "joinability",
+                    "status": "warning",
+                    "message": "labor-cost data は個人別 attendance と直接 join できない。",
+                }
+            ],
+        }
+        report["monthly_summaries"] = [
+            {
+                "month": "2026-01",
+                "group_key": "operations",
+                "employee_count": 10,
+                "attendance_days": 200,
+                "issue_count": 1,
+            }
+        ]
+
+        markdown = render_markdown(report)
+
+        self.assertIn("## readiness", markdown)
+        self.assertIn("| 状態 | partial |", markdown)
+        self.assertIn("## 月次サマリー", markdown)
+        self.assertIn("| 2026-01 | operations | 10 | 200 | 1 |", markdown)
 
     def test_forbidden_raw_keys_are_rejected(self):
         base_report = json.loads(FIXTURE_PATH.read_text(encoding="utf-8"))

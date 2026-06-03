@@ -63,9 +63,14 @@ Assert-Exists "docs\product\ARCHITECTURE.md"
 Assert-Exists "docs\product\DATA-DESIGN.md"
 Assert-Exists "docs\product\LEAN-SPEC-PLANNING.md"
 Assert-Exists "lean\LaborLens\Spec\Privacy.lean"
+Assert-Exists "lean\LaborLens\Spec\Workforce.lean"
+Assert-Exists "lean\LaborLens\Spec\GuideSafety.lean"
 Assert-Exists "lean\LaborLens\Theorems\PrivacyTheorems.lean"
+Assert-Exists "lean\LaborLens\Theorems\WorkforceTheorems.lean"
+Assert-Exists "lean\LaborLens\Theorems\GuideSafetyTheorems.lean"
 Assert-Exists "reports\README.md"
 Assert-Exists "tools\README.md"
+Assert-Exists "tools\generate-scale-fixture.ps1"
 
 Assert-Exists "Cargo.toml"
 Assert-Exists "apps\laborlens-rust\Cargo.toml"
@@ -77,6 +82,13 @@ Assert-Exists "apps\laborlens-rust\src\contexts\workforce_analysis\mod.rs"
 Assert-Exists "apps\laborlens-rust\src\contexts\privacy_safety\mod.rs"
 Assert-Exists "apps\laborlens-rust\src\contexts\reporting\mod.rs"
 Assert-Exists "apps\laborlens-rust\src\contexts\guidance\mod.rs"
+Assert-Exists "apps\laborlens-local-server\Cargo.toml"
+Assert-Exists "apps\laborlens-local-server\src\lib.rs"
+Assert-Exists "apps\laborlens-local-ui\index.html"
+Assert-Exists "apps\laborlens-local-ui\src\app.js"
+Assert-Exists "apps\laborlens-local-ui\src\styles.css"
+Assert-Exists "fixtures\privacy\fatigue.csv"
+Assert-Exists "fixtures\scale\scale-seed.json"
 
 foreach ($context in @("ingest", "workforce_analysis", "privacy_safety", "reporting", "guidance")) {
     foreach ($module in @("domain", "application", "infrastructure", "interfaces")) {
@@ -110,6 +122,8 @@ Assert-FileContains "docs\product\DATA-DESIGN.md" "Rust monolith" "data design a
 Assert-FileContains "reports\README.md" "Python" "reports README explains Pike's Python report connection"
 Assert-FileContains "tools\README.md" "apps/laborlens-rust" "tools README keeps production logic out of utility scripts"
 Assert-FileContains "crates\README.md" "retired" "crates README marks independent crate scaffolds as retired"
+Assert-FileContains "apps\laborlens-local-ui\src\app.js" "/api/runs" "local UI calls local server instead of reimplementing core logic"
+Assert-FileContains "apps\laborlens-local-server\src\lib.rs" "run_ingest_workflow" "local server calls the Rust monolith workflow"
 
 Assert-NoIndependentCrateScaffolds
 

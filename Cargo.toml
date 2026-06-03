@@ -2,4 +2,5 @@
 resolver = "2"
 members = [
     "apps/laborlens-rust",
+    "apps/laborlens-local-server",
 ]

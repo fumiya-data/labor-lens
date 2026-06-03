@@ -9,3 +9,9 @@
 - `scale/`: 10000 人規模、複数年 scenario 用の固定 seed scale fixture。
 
 この repository には架空データだけを保存する。
+
+scale fixture は `fixtures/scale/scale-seed.json` を基準にし、必要時に次で生成する。
+
+```powershell
+powershell -NoProfile -ExecutionPolicy Bypass -File tools\generate-scale-fixture.ps1
+```

@@ -43,6 +43,65 @@ def render_markdown(report: dict[str, Any]) -> str:
         )
     )
 
+    readiness = report.get("readiness")
+    if isinstance(readiness, dict):
+        lines.extend(["", "## readiness", ""])
+        lines.extend(
+            _table(
+                ["項目", "値"],
+                [
+                    ["状態", readiness.get("status", "")],
+                    [
+                        "employee-attendance join",
+                        readiness.get("joinable_employee_attendance", ""),
+                    ],
+                    [
+                        "labor-cost-attendance join",
+                        readiness.get("joinable_labor_cost_attendance", ""),
+                    ],
+                ],
+            )
+        )
+        business_checks = readiness.get("business_checks", [])
+        if isinstance(business_checks, list):
+            check_rows = []
+            for check in business_checks:
+                if not isinstance(check, dict):
+                    continue
+                check_rows.append(
+                    [
+                        check.get("check_id", ""),
+                        check.get("kind", ""),
+                        check.get("status", ""),
+                        check.get("message", ""),
+                    ]
+                )
+            lines.extend(["", "### business check", ""])
+            lines.extend(_table(["check ID", "種別", "状態", "メッセージ"], check_rows))
+
+    monthly_summaries = report.get("monthly_summaries")
+    if isinstance(monthly_summaries, list):
+        monthly_rows = []
+        for summary in monthly_summaries:
+            if not isinstance(summary, dict):
+                continue
+            monthly_rows.append(
+                [
+                    summary.get("month", ""),
+                    summary.get("group_key", ""),
+                    summary.get("employee_count", ""),
+                    summary.get("attendance_days", ""),
+                    summary.get("issue_count", ""),
+                ]
+            )
+        lines.extend(["", "## 月次サマリー", ""])
+        lines.extend(
+            _table(
+                ["月", "グループ", "従業員数", "勤怠日数", "issue 数"],
+                monthly_rows,
+            )
+        )
+
     lines.extend(["", "## グループプロファイル概要", ""])
     profile_rows = []
     for profile in profile_report.get("profiles", []):

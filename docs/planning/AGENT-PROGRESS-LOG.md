@@ -206,3 +206,45 @@
 - PostgreSQL adapter は実 DB 接続ではなく、SQL statement と bind parameter order を明示する command model の段階である。
 - `--ingest-smoke` は in-memory workflow であり、DB 書き込みまではまだ接続していない。
 - 次の自然な実装作業は、Radomil の `IngestWorkflowResult` を Dabian の DB command model に変換する adapter use case と、実 PostgreSQL integration test 方針の決定である。
+
+## 2026-06-03 残バックログ実装区切り
+
+ユーザー指示: `IMPL-BACKLOG.md` の残りの作業を実行する。
+
+担当:
+
+- Radomil: Rust workforce analysis、small-group suppression、reporting file output、performance smoke、operations basics。
+- Pike: Python Markdown renderer の readiness / monthly summaries 表示拡張。
+- Leonard: Lean workforce / guide safety 仕様と theorem の追加。
+- Fred: local server / local UI の初期境界、repository structure validation の更新。
+- Dabian: DB schema は今回変更なし。既存 static validation を維持。
+
+報告された成果:
+
+- `workforce_analysis` に readiness、joinability、master issue、grain issue、business check を実装した。
+- `privacy_safety` に `SMALL_GROUP_SUPPRESSED` と 10 人未満 group の公開抑制を追加した。
+- `reporting` に `write_public_artifact_files` を追加し、`public_report_model.json`、`artifact_manifest.json`、`run_summary.json`、`issues.csv`、`privacy_suppressions.csv` を固定名で出力できるようにした。
+- Python renderer に任意の `readiness` と `monthly_summaries` section を追加した。
+- Lean に `Spec/Workforce.lean`、`Spec/GuideSafety.lean`、対応 theorem を追加した。
+- `laborlens-local-server` crate を追加し、`LocalServer::start_run` で Rust monolith の `run_ingest_workflow` を呼ぶ contract を追加した。
+- `apps/laborlens-local-ui` に静的 UI 初期画面を追加した。
+- `fixtures/privacy/fatigue.csv`、`fixtures/scale/scale-seed.json`、`tools/generate-scale-fixture.ps1` を追加した。
+- `shared::ops` に log masking、fingerprint 検証、Source Archive / Artifact Store path を追加した。
+- `IMPL-BACKLOG.md` の 5-15 を `[done]` に更新した。
+
+メインエージェント確認:
+
+- `cargo test` 成功。`laborlens-local-server` 1 test、`laborlens-rust` 22 tests。
+- `python -m unittest discover reports/report_app/tests` 成功。5 tests OK。
+- `powershell -NoProfile -ExecutionPolicy Bypass -File tools\validate-repository-structure.ps1` 成功。
+- `powershell -NoProfile -ExecutionPolicy Bypass -File tools\validate-db-schema.ps1` 成功。
+- `lake build` を `lean/` で実行し成功。17 jobs。
+- `cargo run -p laborlens-rust -- --ingest-smoke` 成功。
+- `cargo run -p laborlens-rust --quiet | python reports/report_app/main.py --input - --output -` 成功。
+- `powershell -NoProfile -ExecutionPolicy Bypass -File tools\generate-scale-fixture.ps1 -EmployeeCount 3 -OutputDir tmp/scale-smoke-verify` 成功。
+
+現在の注意点:
+
+- local server は HTTP 実装ではなく、HTTP 化前の Rust contract crate である。
+- local UI は静的初期画面であり、実 server endpoint との browser integration は次 slice の対象である。
+- PostgreSQL は引き続き static schema / command model 段階であり、実 connection adapter は次 slice の対象である。

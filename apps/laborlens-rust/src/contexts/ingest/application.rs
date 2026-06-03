@@ -380,4 +380,38 @@ mod tests {
             .expect("failed job should carry a reason")
             .contains("schema issue"));
     }
+
+    #[test]
+    fn performance_smoke_ingests_ten_thousand_synthetic_rows() {
+        let mut employees_csv = String::from("社員ID,氏名,部署,入社日,雇用状態\n");
+        let mut attendance_csv = String::from("社員ID,勤務日,出勤時刻,退勤時刻,休憩分\n");
+        for index in 1..=10_000 {
+            let employee_id = format!("E{index:05}");
+            employees_csv.push_str(&format!(
+                "{employee_id},従業員{index},operations,2024-04-01,在籍\n"
+            ));
+            attendance_csv.push_str(&format!(
+                "{employee_id},2026-01-05,09:00,18:00,60\n"
+            ));
+        }
+
+        let result = run_ingest_workflow(IngestRunCommand::new(
+            RunId::new("run-performance-smoke-001"),
+            crate::contexts::ingest::interfaces::CsvInput::new(
+                DatasetKind::Employees,
+                "synthetic/employees.csv",
+                employees_csv,
+            ),
+            crate::contexts::ingest::interfaces::CsvInput::new(
+                DatasetKind::Attendance,
+                "synthetic/attendance.csv",
+                attendance_csv,
+            ),
+        ));
+
+        assert_eq!(result.job.current_state, JobState::Succeeded);
+        assert_eq!(result.row_counts.employee_rows, 10_000);
+        assert_eq!(result.row_counts.attendance_rows, 10_000);
+        assert!(result.issues.is_empty());
+    }
 }

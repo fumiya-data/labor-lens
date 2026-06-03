@@ -68,3 +68,10 @@ cargo run -p laborlens-rust -- --ingest-smoke
 ```
 
 この smoke は、valid fixture を読み取り、`input_refs`、job state、row counts、issues、run summary を JSON で出力する。現時点では in-memory workflow であり、PostgreSQL への実書き込みは行わない。
+
+## workforce / privacy / reporting
+
+- `workforce_analysis`: readiness、joinability、master issue、grain issue、business check を分離して返す。
+- `privacy_safety`: 個人健康詳細と 10 人未満の small-group aggregate を公開 artifact 生成前に抑制する。
+- `reporting`: `public_report_model.json`、`artifact_manifest.json`、`run_summary.json`、`issues.csv`、`privacy_suppressions.csv` を固定名で出力できる。
+- `shared::ops`: log masking、input fingerprint 検証、Source Archive / Artifact Store path を提供する。
