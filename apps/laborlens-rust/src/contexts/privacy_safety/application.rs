@@ -146,4 +146,25 @@ mod tests {
             .iter()
             .any(|summary| summary.suppression_code == SMALL_GROUP_SUPPRESSION_CODE));
     }
+
+    #[test]
+    fn property_group_visibility_matches_minimum_safe_group_size() {
+        for group_size in 0..=20 {
+            let employees = (0..group_size)
+                .map(|index| employee(&format!("E{index:03}"), "operations"))
+                .collect();
+            let public_report = filter_public_report(dataset_with_employees(employees));
+
+            let should_be_public = group_size
+                >= crate::contexts::privacy_safety::domain::MINIMUM_SAFE_AGGREGATE_GROUP_SIZE;
+            assert_eq!(!public_report.profiles.is_empty(), should_be_public);
+            assert_eq!(
+                public_report
+                    .suppression_summary
+                    .iter()
+                    .any(|summary| summary.suppression_code == SMALL_GROUP_SUPPRESSION_CODE),
+                group_size > 0 && !should_be_public
+            );
+        }
+    }
 }

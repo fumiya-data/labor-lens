@@ -71,6 +71,53 @@ local RAG は初期 local UI milestone には含めない。初期 UI では `Ru
 
 RAG を導入する場合、検索対象は承認済み、版管理済み、抑制後情報だけに限定する。未承認文書、抑制前データ、個人別データ、監査ログ、下書き文書、Slack、メール、チケット原文はインデックスへ投入してはならない。
 
-## 7. 未決事項
+## 7. Installer 同梱コンポーネント運用
+
+本番配布では、Tauri installer に PostgreSQL、Ollama、初期モデル `qwen3:8b` を同梱する方針とする。利用者が PostgreSQL や Ollama を別途手動インストールしなくても、初回起動時に local services として利用できる状態を目標にする。
+
+### 7.1 PostgreSQL 同梱運用
+
+PostgreSQL は managed local cluster として扱う。
+
+| 項目 | 方針 |
+| --- | --- |
+| 初期化 | 初回起動時に app 管理下の local data directory へ data directory を作成する |
+| migration | installer 付属の migration を起動時または明示操作で適用する |
+| 接続 | UI は直接接続しない。Local Server API / worker だけが接続する |
+| 起動停止 | Tauri shell または local server 起動管理が service lifecycle を扱う |
+| data directory | OS ディスク暗号化またはアプリケーション管理の暗号化領域に置く |
+| backup | 暗号化済み backup だけを許可する |
+| update | PostgreSQL runtime 更新時は schema migration、backup、rollback 手順を確認する |
+
+既存 PostgreSQL が利用者環境に存在しても、LaborLens は既定では同梱 managed cluster を使う。外部 PostgreSQL 接続は、運用設計で明示的に許可した場合だけ設定可能にする。
+
+### 7.2 Ollama / model 同梱運用
+
+Ollama と初期モデル `qwen3:8b` は、ガイド AI 用の local runtime として同梱する方針とする。
+
+| 項目 | 方針 |
+| --- | --- |
+| 初期化 | 初回起動時に Ollama runtime と model availability を確認する |
+| model | 初期モデルは `qwen3:8b` とする |
+| 接続 | UI は直接接続しない。Local Server API の Guide AI gateway だけが接続する |
+| 参照対象 | 承認済み、版管理済み、プライバシー安全確認済み文書と抑制後情報だけ |
+| model directory | app 管理下の local data directory に分離して配置する |
+| update | model 更新は明示操作とし、model version、更新日時、評価結果を記録する |
+| fallback | model が利用できない場合は、AI assistant を無効化し、RuleExplanation を表示する |
+
+Ollama を同梱しても、抑制前データ、原本 CSV、個人別データ、監査ログ、下書き文書を model prompt や RAG index に入れてはならない。
+
+### 7.3 同梱時の確認事項
+
+同梱配布を実装する前に、次を確認する。
+
+- PostgreSQL runtime の再配布条件、version 固定、更新手順
+- Ollama runtime と model の再配布条件、model size、更新手順
+- installer size と初回起動時間
+- data directory、model directory、backup directory の配置
+- Windows 環境での service lifecycle、port conflict、permission
+- uninstall 時に application binary と user data を分けて扱うこと
+
+## 8. 未決事項
 
 現時点で、本書で保留する主要未決事項はない。保持期間、端末別暗号化方式、鍵ローテーション周期は、導入先の運用ポリシーに合わせて設定値として管理する。

@@ -6,6 +6,8 @@
 
 use std::fmt;
 
+pub mod postgres;
+
 const INSERT_RUN_RECORD_SQL: &str = "INSERT INTO laborlens.run_records \
     (run_id, tenant_id, run_status, readiness_status, schema_version, settings) \
     VALUES ($1, $2, $3, $4, $5, $6)";
@@ -73,21 +75,71 @@ impl SqlCommand {
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct SqlParam {
     name: &'static str,
-    value: Option<String>,
+    value: SqlValue,
 }
 
 impl SqlParam {
     pub fn required(name: &'static str, value: impl Into<String>) -> Self {
+        Self::text(name, value)
+    }
+
+    pub fn text(name: &'static str, value: impl Into<String>) -> Self {
         Self {
             name,
-            value: Some(value.into()),
+            value: SqlValue::Text(value.into()),
         }
     }
 
     pub fn nullable(name: &'static str, value: Option<impl Into<String>>) -> Self {
+        Self::nullable_text(name, value)
+    }
+
+    pub fn nullable_text(name: &'static str, value: Option<impl Into<String>>) -> Self {
         Self {
             name,
-            value: value.map(Into::into),
+            value: value.map(Into::into).map_or(SqlValue::Null, SqlValue::Text),
+        }
+    }
+
+    pub fn int64(name: &'static str, value: i64) -> Self {
+        Self {
+            name,
+            value: SqlValue::Int64(value),
+        }
+    }
+
+    pub fn nullable_int64(name: &'static str, value: Option<i64>) -> Self {
+        Self {
+            name,
+            value: value.map_or(SqlValue::Null, SqlValue::Int64),
+        }
+    }
+
+    pub fn int32(name: &'static str, value: i32) -> Self {
+        Self {
+            name,
+            value: SqlValue::Int32(value),
+        }
+    }
+
+    pub fn nullable_int32(name: &'static str, value: Option<i32>) -> Self {
+        Self {
+            name,
+            value: value.map_or(SqlValue::Null, SqlValue::Int32),
+        }
+    }
+
+    pub fn boolean(name: &'static str, value: bool) -> Self {
+        Self {
+            name,
+            value: SqlValue::Bool(value),
+        }
+    }
+
+    pub fn json(name: &'static str, value: impl Into<String>) -> Self {
+        Self {
+            name,
+            value: SqlValue::Json(value.into()),
         }
     }
 
@@ -96,7 +148,31 @@ impl SqlParam {
     }
 
     pub fn value(&self) -> Option<&str> {
-        self.value.as_deref()
+        self.value.as_str()
+    }
+
+    pub fn sql_value(&self) -> &SqlValue {
+        &self.value
+    }
+}
+
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub enum SqlValue {
+    Null,
+    Text(String),
+    Int64(i64),
+    Int32(i32),
+    Bool(bool),
+    Json(String),
+}
+
+impl SqlValue {
+    pub fn as_str(&self) -> Option<&str> {
+        match self {
+            Self::Null => None,
+            Self::Text(value) | Self::Json(value) => Some(value.as_str()),
+            Self::Int64(_) | Self::Int32(_) | Self::Bool(_) => None,
+        }
     }
 }
 
@@ -142,7 +218,7 @@ impl InsertRunRecord {
                 SqlParam::required("run_status", self.run_status.clone()),
                 SqlParam::required("readiness_status", self.readiness_status.clone()),
                 SqlParam::required("schema_version", self.schema_version.clone()),
-                SqlParam::required("settings", self.settings_json.clone()),
+                SqlParam::json("settings", self.settings_json.clone()),
             ],
         )
     }
@@ -220,20 +296,14 @@ impl InsertInputRef {
                 SqlParam::required("original_filename", self.original_filename.clone()),
                 SqlParam::required("source_uri", self.source_uri.clone()),
                 SqlParam::required("file_hash_sha256", self.file_hash_sha256.clone()),
-                SqlParam::required("size_bytes", self.size_bytes.to_string()),
+                SqlParam::int64("size_bytes", self.size_bytes),
                 SqlParam::required("encoding", self.encoding.clone()),
                 SqlParam::required("delimiter", self.delimiter.clone()),
-                SqlParam::required("has_header", self.has_header.to_string()),
+                SqlParam::boolean("has_header", self.has_header),
                 SqlParam::required("schema_version", self.schema_version.clone()),
-                SqlParam::nullable(
-                    "detected_row_count",
-                    self.detected_row_count.map(|value| value.to_string()),
-                ),
-                SqlParam::nullable(
-                    "detected_column_count",
-                    self.detected_column_count.map(|value| value.to_string()),
-                ),
-                SqlParam::required("metadata", self.metadata_json.clone()),
+                SqlParam::nullable_int64("detected_row_count", self.detected_row_count),
+                SqlParam::nullable_int32("detected_column_count", self.detected_column_count),
+                SqlParam::json("metadata", self.metadata_json.clone()),
             ],
         )
     }
@@ -290,9 +360,9 @@ impl InsertJob {
                 SqlParam::required("run_id", self.run_id.clone()),
                 SqlParam::required("job_type", self.job_type.clone()),
                 SqlParam::required("state", self.state.as_str()),
-                SqlParam::required("priority", self.priority.to_string()),
-                SqlParam::required("max_attempts", self.max_attempts.to_string()),
-                SqlParam::required("payload", self.payload_json.clone()),
+                SqlParam::int32("priority", self.priority),
+                SqlParam::int32("max_attempts", self.max_attempts),
+                SqlParam::json("payload", self.payload_json.clone()),
             ],
         )
     }
@@ -347,10 +417,7 @@ impl UpdateJobState {
             UPDATE_JOB_STATE_SQL,
             vec![
                 SqlParam::required("state", self.state.as_str()),
-                SqlParam::nullable(
-                    "progress_percent",
-                    self.progress_percent.map(|value| value.to_string()),
-                ),
+                SqlParam::nullable_int32("progress_percent", self.progress_percent),
                 SqlParam::nullable("stage", self.stage.clone()),
                 SqlParam::nullable("failure_kind", self.failure_kind.clone()),
                 SqlParam::nullable(
@@ -487,10 +554,7 @@ impl InsertIssue {
                 SqlParam::nullable("normalized_ref_id", self.normalized_ref_id.clone()),
                 SqlParam::nullable("output_ref_id", self.output_ref_id.clone()),
                 SqlParam::nullable("dataset_kind", self.dataset_kind.clone()),
-                SqlParam::nullable(
-                    "source_row_number",
-                    self.source_row_number.map(|value| value.to_string()),
-                ),
+                SqlParam::nullable_int64("source_row_number", self.source_row_number),
                 SqlParam::nullable("column_name", self.column_name.clone()),
                 SqlParam::nullable("raw_column_name", self.raw_column_name.clone()),
                 SqlParam::required("issue_category", self.issue_category.clone()),
@@ -502,7 +566,7 @@ impl InsertIssue {
                 SqlParam::nullable("evidence_value_masked", self.evidence_value_masked.clone()),
                 SqlParam::required("status", self.status.clone()),
                 SqlParam::required("privacy_status", self.privacy_status.clone()),
-                SqlParam::required("metadata", self.metadata_json.clone()),
+                SqlParam::json("metadata", self.metadata_json.clone()),
             ],
         )
     }

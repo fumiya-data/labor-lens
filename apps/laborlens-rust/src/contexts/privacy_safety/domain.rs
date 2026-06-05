@@ -65,8 +65,8 @@ impl From<PrivacyPolicy> for PolicyTrace {
         Self {
             policy_id: policy.policy_id,
             version: policy.version,
-            safety_boundary:
-                "公開 artifact 生成前に個人の健康関連詳細と少人数集団を抑制する".to_string(),
+            safety_boundary: "公開 artifact 生成前に個人の健康関連詳細と少人数集団を抑制する"
+                .to_string(),
         }
     }
 }

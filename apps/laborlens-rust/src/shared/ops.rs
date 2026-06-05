@@ -45,7 +45,13 @@ mod tests {
 
     #[test]
     fn defines_source_archive_and_artifact_store_paths() {
-        assert_eq!(source_archive_path("tenant-a", "run-001"), ".laborlens/tenant-a/run-001/source-archive");
-        assert_eq!(artifact_store_path("tenant-a", "run-001"), ".laborlens/tenant-a/run-001/artifact-store");
+        assert_eq!(
+            source_archive_path("tenant-a", "run-001"),
+            ".laborlens/tenant-a/run-001/source-archive"
+        );
+        assert_eq!(
+            artifact_store_path("tenant-a", "run-001"),
+            ".laborlens/tenant-a/run-001/artifact-store"
+        );
     }
 }

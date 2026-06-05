@@ -248,3 +248,176 @@
 - local server は HTTP 実装ではなく、HTTP 化前の Rust contract crate である。
 - local UI は静的初期画面であり、実 server endpoint との browser integration は次 slice の対象である。
 - PostgreSQL は引き続き static schema / command model 段階であり、実 connection adapter は次 slice の対象である。
+
+## 2026-06-03 モジュール別レビュー区切り
+
+ユーザー指示: repository 全体について各モジュールごとにレビューを行い、テスト可能なものについては性質テストを実施する。レビュー結果は `docs/` に保管する。
+
+担当:
+
+- Radomil: Rust engine review と Rust 性質テスト。
+- Fred: repository structure review。
+- Leonard: Lean build review。
+- Pike: Python report app review と Python 性質テスト。
+- Dabian: PostgreSQL schema / command model review。
+- メインエージェント: 全体検証とレビュー文書化。
+
+報告された成果:
+
+- `docs/planning/MODULE-REVIEW-2026-06-03.md` を追加し、モジュール別レビュー結果、追加した性質テスト、検証結果、残リスクを記録した。
+- `ingest` に、生成 CSV の行数、input ref 件数、fingerprint 安定性を確認する性質テストを追加した。
+- `workforce_analysis` に、`labor_cost` 側だけの `missing_employee` issue が employee-attendance joinability を落とさないことを確認する性質テストを追加した。
+- 上記テストにより、`workforce_analysis` の joinability 判定が issue の `dataset_id` を見ていない不具合を検出し、修正した。
+- `privacy_safety` に、group size と small-group suppression の境界を確認する性質テストを追加した。
+- `reports/report_app` に、禁止 raw key が nested path のどこに現れても拒否されることを確認する性質テストを追加した。
+
+メインエージェント確認:
+
+- `cargo test` 成功。`laborlens-local-server` 1 test、`laborlens-rust` 25 tests。
+- `python -m unittest discover reports/report_app/tests` 成功。6 tests OK。
+- `powershell -NoProfile -ExecutionPolicy Bypass -File tools\validate-repository-structure.ps1` 成功。
+- `powershell -NoProfile -ExecutionPolicy Bypass -File tools\validate-db-schema.ps1` 成功。
+- `lake build` を `lean/` で実行し成功。17 jobs。
+- `cargo run -p laborlens-rust --quiet | python reports/report_app/main.py --input - --output -` 成功。
+
+現在の注意点:
+
+- `shared::db` は static command model 段階であり、live PostgreSQL adapter と integration test は未実装である。
+- `apps/laborlens-local-server` は contract crate 段階であり、HTTP endpoint は未実装である。
+- `apps/laborlens-local-ui` は静的初期画面であり、自動 DOM test と browser integration は未実装である。
+
+## 2026-06-03 ユースケース UI / デモ DB seed 区切り
+
+ユーザー指示: DB に 1000 人分の日本人ダミーレコードを入れ、UI ではユースケースに応じたボタンを用意し、そのボタンからデータを読み込めるようにする。
+
+担当:
+
+- Fred: UI 構成、local server HTTP 境界、repository validation 更新。
+- Dabian: PostgreSQL demo seed、seed 適用スクリプト、DB static validation 更新。
+- Radomil: local server から Rust monolith contract を保ちながらユースケース sample API を追加。
+- メインエージェント: PostgreSQL 起動、seed 投入、API/UI 起動確認、全体検証。
+
+報告された成果:
+
+- `db/seeds/0001_demo_japanese_employees.sql` を追加し、`laborlens.demo_employees` に 1000 人分の架空日本人従業員 seed を投入できるようにした。
+- `tools/seed-demo-db.ps1` を追加し、migration と demo seed を PostgreSQL へ適用できるようにした。
+- `apps/laborlens-local-server` に `GET /api/use-cases` と `GET /api/use-cases/{use_case_id}/sample-data` を追加した。
+- local server は `LABORLENS_DEMO_DATABASE_URL` がある場合、実 PostgreSQL の `laborlens.demo_employees` から seed を読み込む。接続できない場合は同じ 1000 人 seed repository に fallback する。
+- `apps/laborlens-local-ui` に 14 個のユースケースボタン、DB seed 状態表示、metrics、sample rows、検出結果、次の確認欄を追加した。
+- `tools/validate-db-schema.ps1` と `tools/validate-repository-structure.ps1` に demo seed / seed script の静的検証を追加した。
+
+メインエージェント確認:
+
+- 専用 PostgreSQL cluster を `tmp/laborlens-pgdata` に作成し、`127.0.0.1:55432` で起動した。
+- `laborlens.demo_employees` に 1000 件投入済み。確認結果: `1000|EMP-0001|EMP-1000`。
+- local server を `LABORLENS_DEMO_DATABASE_URL=postgres://laborlens@127.0.0.1:55432/laborlens` で起動し、`http://127.0.0.1:5174/` を配信した。
+- `GET /api/use-cases` は 14 件を返した。
+- `GET /api/use-cases/uc-01/sample-data` は `employee_count: 1000`、`table_name: laborlens.demo_employees`、sample row を返した。
+- `cargo test` 成功。`laborlens-local-server` 5 tests、`laborlens-rust` 25 tests。
+- `python -m unittest discover reports/report_app/tests` 成功。6 tests OK。
+- `powershell -NoProfile -ExecutionPolicy Bypass -File tools\validate-repository-structure.ps1` 成功。
+- `powershell -NoProfile -ExecutionPolicy Bypass -File tools\validate-db-schema.ps1` 成功。
+- `lake build` を `lean/` で実行し成功。17 jobs。
+- `cargo run -p laborlens-rust --quiet | python reports/report_app/main.py --input - --output -` 成功。
+
+現在の注意点:
+
+- 既存システム PostgreSQL `127.0.0.1:5432` は起動しているが、認証情報がないため seed 適用はできなかった。今回の実投入は repository local の専用 PostgreSQL cluster `127.0.0.1:55432` に対して行った。
+- `/api/runs` の HTTP worker 接続は未実装である。今回の UI 操作はユースケース別 DB sample 読み込みに対応した。
+
+## 2026-06-03 UI 技術選定 / 画面分割設計区切り
+
+ユーザー指示: 将来の local UI について、Ollama AI assistant を組み込む前提で UI 技術スタックを決定し、一画面に情報を詰め込まずページやタブで分割する方針を `docs/` に記録する。
+
+担当:
+
+- メインエージェント: 現行 UI、アーキテクチャ文書、外部設計文書を確認し、設計決定として文書化。
+
+報告された成果:
+
+- `docs/product/EXTERNAL-DESIGN.md` に `UI 実装スタック` を追加した。
+- 将来の local UI は `Vite + React + TypeScript`、`shadcn/ui`、`TanStack Table`、`TanStack Query`、`assistant-ui` を使う方針にした。
+- Ollama assistant は UI から直接呼ばず、必ず Local Server API 経由で接続する方針を明記した。
+- `docs/product/ARCHITECTURE.md` の基本構成に UI 実装スタックと Guide AI 接続方針を追加した。
+- `docs/product/ARCHITECTURE.md` に `ADR-ARCH-009` として UI 技術スタック採用を追加した。
+- `docs/product/EXTERNAL-DESIGN.md` に `画面分割方針` を追加した。
+- local UI は一画面に全情報を詰め込まず、`実行`、`結果`、`不備一覧`、`レポート`、`再確認`、`ガイド`、`設定` に分ける方針にした。
+- 詳細表示は、作業目的に応じてページ遷移、タブ、ドロワー、モーダル、別タブまたは別ウィンドウを使い分ける方針にした。
+- `docs/product/EXTERNAL-DESIGN.md` の未決事項対応表に `UI-STACK-001` と `UI-LAYOUT-001` を追加した。
+
+現在の進捗状況:
+
+- 現行 UI はまだ `apps/laborlens-local-ui` の静的 HTML / JavaScript / CSS であり、React 化は未実装である。
+- ユースケース別 DB sample 読み込みは実装済みで、14 個のユースケースボタンから 1000 人 seed のサンプルを表示できる。
+- CSV run 本線は未接続であり、`/api/runs` は HTTP worker 接続前の状態である。
+- PostgreSQL は demo seed の実投入確認済みだが、本番 run の state / artifact / job を書き込む live adapter は未実装である。
+- Rust core、privacy/safety、reporting、Python Markdown renderer、Lean safety spec、DB schema / command model は初期接続済みである。
+- UI 設計上は、情報密度を分ける方針と AI assistant の接続境界が決定済みになった。
+
+残りの作業:
+
+- `apps/laborlens-local-ui` を Vite + React + TypeScript へ移行する。
+- shadcn/ui の初期設定、レイアウト shell、左サイドバー、ページルーティングを追加する。
+- TanStack Query で Local Server API の run、progress、use case、artifact、report、guide response を取得する境界を作る。
+- TanStack Table で issues、readiness、artifact、run history、修正依頼一覧を表示する。
+- assistant-ui を組み込み、Guide AI / RuleExplanation を表示する。ただし Ollama へは UI から直接接続しない。
+- Local Server API に `/api/runs`、job progress、artifact listing、report fetch、guide assistant endpoint を接続する。
+- IngestWorkflowResult を live PostgreSQL adapter に接続し、run state、input refs、jobs、issues、artifacts を transaction で保存する。
+- Source Archive / Artifact Store の実 file adapter を追加し、原本 CSV と抑制後成果物を分離して保存する。
+- UI browser integration test、DOM test、API integration smoke を追加する。
+- 大量 CSV を UI スレッドで処理しないこと、進捗が取得できること、抑制前データが UI / Guide AI に出ないことをテストする。
+
+現在の注意点:
+
+- UI 技術選定は設計決定として保存済みだが、package.json、Vite config、React component 実装はまだ作っていない。
+- assistant-ui と Ollama の組み込みは、Local Server API の安全境界、許可済み文脈、ログマスキング、プロンプト注入対策と同時に設計する必要がある。
+- 画面分割方針により、最初の React 実装では「全情報ダッシュボード」ではなく、実行サマリーから各ページへ誘導する構成を優先する。
+
+## 2026-06-03 Tauri desktop app 配布方針区切り
+
+ユーザー指示: UI は Tauri + React で desktop app 化し、installer 付きの単体配布を目標にする。
+
+担当:
+
+- メインエージェント: 既存の UI 技術選定、アーキテクチャ、README、進捗ログへ Tauri 配布方針を反映。
+
+報告された成果:
+
+- `docs/product/EXTERNAL-DESIGN.md` の UI 実装スタックに `desktop shell: Tauri` を追加した。
+- `docs/product/EXTERNAL-DESIGN.md` に `Desktop 配布方針` を追加した。
+- 最終的な local UI は、Tauri + React により Windows desktop app として installer 付きで配布する方針にした。
+- 初期開発では Vite dev server と Rust local server を個別に起動してよいが、本番配布では Tauri installer から起動できる単体 desktop app を目標にした。
+- `docs/product/ARCHITECTURE.md` の基本構成に `配布形態` と Tauri を含む UI 実装スタックを追加した。
+- 論理コンポーネントに `Tauri Desktop Shell` を追加し、React UI と Local Server API の間の desktop shell として整理した。
+- 責務分担表に `Tauri Desktop Shell` を追加し、Tauri は配布、file dialog、アプリ設定、local server / worker 起動管理を担当し、業務ロジックや AI 安全境界は担当しないと明記した。
+- `docs/product/ARCHITECTURE.md` に `ADR-ARCH-010` として Tauri installer 配布採用を追加した。
+- `README.md` の初期本番スタックに、Tauri + React desktop app と installer 付き配布方針を追加した。
+- PostgreSQL、Ollama、初期モデル `qwen3:8b` を installer に同梱する方針を `README.md`、`EXTERNAL-DESIGN.md`、`ARCHITECTURE.md`、`OPERATIONS.md` に追記した。
+- `docs/product/ARCHITECTURE.md` に `ADR-ARCH-011` として PostgreSQL / Ollama 同梱配布採用を追加した。
+- `docs/product/OPERATIONS.md` に `Installer 同梱コンポーネント運用` を追加し、PostgreSQL managed local cluster、Ollama / model 同梱、更新、fallback、確認事項を整理した。
+
+現在の進捗状況:
+
+- 現行 UI はまだ静的 HTML / JavaScript / CSS であり、Tauri project は未作成である。
+- React 化、Vite config、TypeScript、shadcn/ui、TanStack、assistant-ui の package 導入は未実装である。
+- Tauri は設計上の最終配布形態として決定済みだが、installer、sidecar、local server 起動管理、worker 起動管理は未実装である。
+- AI assistant は引き続き Local Server API 経由で Ollama に接続する方針であり、Tauri から Ollama を直接呼ぶ方針ではない。
+- PostgreSQL と Ollama は installer 同梱方針に変更済みである。ただし runtime の再配布条件、installer size、更新手順、port conflict、uninstall 時の user data 扱いは実装前確認が必要である。
+
+残りの作業:
+
+- `apps/laborlens-local-ui` を Tauri + Vite + React + TypeScript 構成へ移行する。
+- Tauri の `src-tauri`、desktop app metadata、dev / build command、React build output の設定を追加する。
+- local server / worker を Tauri sidecar にするか、同一 Rust binary 内の command boundary にするかを実装前に決める。
+- installer に含める対象を整理する。候補は Tauri shell、React build asset、local server / worker binary、migration helper、initial directory helper、起動 script。
+- PostgreSQL を installer に同梱し、managed local cluster として初期化する実装を追加する。
+- Ollama runtime と初期モデル `qwen3:8b` を installer に同梱し、初回起動時に availability を確認する実装を追加する。
+- PostgreSQL data directory、Ollama model directory、Source Archive、Artifact Store を app 管理下の local data directory に分離して配置する。
+- PostgreSQL / Ollama / model の version 固定、更新確認、backup、rollback、uninstall 時の user data 保持方針を実装する。
+- Tauri app から `/api/runs`、progress、artifact、guide assistant endpoint へ接続する integration smoke を追加する。
+- installer 作成後、Windows 環境で初回起動、DB 初期化、Ollama 接続確認、CSV run、artifact 表示まで確認する。
+
+現在の注意点:
+
+- 「単体配布」は利用者の入口として installer 付き desktop app にするという配布方針であり、PostgreSQL と Ollama も同梱する方針である。サイズ、ライセンス、運用、アップデート方法は実装前に確認する。
+- Tauri を入れても、UI が抑制前データ、PostgreSQL、Ollama、RAG index へ直接接続してよいわけではない。安全境界は引き続き Local Server API 側に置く。

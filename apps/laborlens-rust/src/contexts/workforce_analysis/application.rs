@@ -122,9 +122,10 @@ pub fn analyze_workforce(input: WorkforceAnalysisInput) -> WorkforceAnalysisResu
 
     let employee_attendance_joinable = !input.employees.is_empty()
         && !input.attendance.is_empty()
-        && !issues
-            .iter()
-            .any(|issue| issue.issue_code == "missing_employee");
+        && !issues.iter().any(|issue| {
+            issue.issue_code == "missing_employee"
+                && issue.dataset_id.as_deref() == Some("attendance_by_employee")
+        });
     let readiness_status = readiness_status(&input, &issues);
 
     WorkforceAnalysisResult {
@@ -140,10 +141,7 @@ pub fn analyze_workforce(input: WorkforceAnalysisInput) -> WorkforceAnalysisResu
     }
 }
 
-fn readiness_status(
-    input: &WorkforceAnalysisInput,
-    issues: &[WorkforceIssue],
-) -> ReadinessStatus {
+fn readiness_status(input: &WorkforceAnalysisInput, issues: &[WorkforceIssue]) -> ReadinessStatus {
     if input.employees.is_empty() || input.attendance.is_empty() {
         ReadinessStatus::Blocked
     } else if issues.is_empty() {
@@ -327,5 +325,28 @@ mod tests {
             .issues
             .iter()
             .any(|issue| issue.issue_code == "missing_core_dataset"));
+    }
+
+    #[test]
+    fn property_employee_attendance_joinability_ignores_labor_cost_only_issues() {
+        let result = analyze_workforce(WorkforceAnalysisInput {
+            employees: vec![employee("E001", "operations", "在籍")],
+            attendance: vec![attendance("E001")],
+            labor_costs: vec![LaborCostRecord {
+                month: "2026-01".to_string(),
+                grain: LaborCostGrain::EmployeeMonthly,
+                employee_id: Some("E999".to_string()),
+                department: Some("operations".to_string()),
+                amount_yen: 300000,
+            }],
+        });
+
+        assert!(result
+            .issues
+            .iter()
+            .any(|issue| issue.dataset_id.as_deref() == Some("labor_cost")
+                && issue.issue_code == "missing_employee"));
+        assert!(result.joinable_employee_attendance);
+        assert!(!result.joinable_labor_cost_attendance);
     }
 }

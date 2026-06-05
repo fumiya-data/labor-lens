@@ -1,6 +1,7 @@
 param(
     [string]$Root = (Resolve-Path (Join-Path $PSScriptRoot "..")).Path,
     [string]$MigrationRelativePath = "db\migrations\0001_initial_postgresql_schema.sql",
+    [string]$DemoSeedRelativePath = "db\seeds\0001_demo_japanese_employees.sql",
     [string]$InterfaceDocRelativePath = "docs\planning\DB-INTERFACES.md",
     [string]$RustAdapterRelativePath = "apps\laborlens-rust\src\shared\db.rs",
     [string]$RustSharedModRelativePath = "apps\laborlens-rust\src\shared\mod.rs"
@@ -60,11 +61,13 @@ $migrationPath = Join-RepoPath $MigrationRelativePath
 $interfaceDocPath = Join-RepoPath $InterfaceDocRelativePath
 
 Assert-Exists $MigrationRelativePath
+Assert-Exists $DemoSeedRelativePath
 Assert-Exists $InterfaceDocRelativePath
 Assert-Exists $RustAdapterRelativePath
 Assert-Exists $RustSharedModRelativePath
 
 $sql = Get-Content -Raw -Encoding UTF8 $migrationPath
+$demoSeed = Get-Content -Raw -Encoding UTF8 (Join-RepoPath $DemoSeedRelativePath)
 $doc = Get-Content -Raw -Encoding UTF8 $interfaceDocPath
 $rustAdapter = Get-Content -Raw -Encoding UTF8 (Join-RepoPath $RustAdapterRelativePath)
 $rustSharedMod = Get-Content -Raw -Encoding UTF8 (Join-RepoPath $RustSharedModRelativePath)
@@ -162,6 +165,11 @@ Assert-Matches $tableBlocks["report_artifacts"] "(?is)ck_report_artifacts_privac
 Assert-Matches $sql "(?is)COMMENT\s+ON\s+TABLE\s+(?:laborlens\.)?report_artifacts\s+IS\s+'.*No raw CSV rows.*suppressed.*'" "report_artifacts raw-data protection comment exists"
 Assert-Matches $sql "(?is)COMMENT\s+ON\s+TABLE\s+(?:laborlens\.)?artifact_manifests\s+IS\s+'.*suppressed.*metadata.*'" "artifact_manifests suppressed metadata comment exists"
 Assert-Matches $sql "(?is)Partitioning policy" "migration records the initial partitioning policy"
+
+Assert-Matches $demoSeed "(?is)CREATE\s+TABLE\s+IF\s+NOT\s+EXISTS\s+laborlens\.demo_employees" "demo seed creates demo_employees table"
+Assert-Matches $demoSeed "(?is)generate_series\s*\(\s*1\s*,\s*1000\s*\)" "demo seed generates 1000 records"
+Assert-Matches $demoSeed "(?is)demo_japanese_employees\.v1" "demo seed has stable seed version"
+Assert-Matches $demoSeed "(?is)SELECT\s+count\(\*\).*seeded_count" "demo seed verifies inserted row count"
 
 foreach ($name in @("Radomil", "Pike", "Leonard", "RunArtifact", "privacy_suppressions", "report_artifacts", "jobs")) {
     Assert-Matches $doc "(?is)\b$name\b" "interface document mentions $name"

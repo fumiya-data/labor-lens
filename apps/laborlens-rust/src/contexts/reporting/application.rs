@@ -142,9 +142,7 @@ mod tests {
             attendance_days_observed: 21,
             fatigue_value: Some(97),
             sleep_duration_hours: Some(4.25),
-            fatigue_comment: Some(
-                "raw fatigue marker comment should never reach Pike".to_string(),
-            ),
+            fatigue_comment: Some("raw fatigue marker comment should never reach Pike".to_string()),
         });
         employees.extend((2..=10).map(|index| InternalEmployeeProfile {
             employee_ref: format!("EMP-PRIVATE-{index:03}"),

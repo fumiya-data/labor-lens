@@ -3,18 +3,59 @@
   <head>
     <meta charset="utf-8" />
     <meta name="viewport" content="width=device-width, initial-scale=1" />
-    <title>LaborLens local UI</title>
+    <title>LaborLens ローカル UI</title>
     <link rel="stylesheet" href="./src/styles.css" />
   </head>
   <body>
     <main class="shell">
       <header class="toolbar">
-        <h1>LaborLens local UI</h1>
+        <h1>LaborLens ローカル UI</h1>
         <span id="run-status" class="status" aria-live="polite">未実行</span>
       </header>
 
+      <section class="panel use-case-panel" aria-labelledby="use-case-heading">
+        <div class="panel-header">
+          <h2 id="use-case-heading">ユースケース</h2>
+          <span id="demo-db-status" class="status-chip">DB 未読込</span>
+        </div>
+        <div id="use-case-buttons" class="use-case-buttons" aria-label="ユースケース選択"></div>
+      </section>
+
+      <section class="panel use-case-output" aria-labelledby="selected-use-case-heading">
+        <div class="panel-header">
+          <h2 id="selected-use-case-heading">読み込み結果</h2>
+          <span id="selected-use-case-actor" class="muted">未選択</span>
+        </div>
+        <p id="selected-use-case-summary" class="summary-text">ユースケースを選択してください。</p>
+        <div id="use-case-metrics" class="metric-grid"></div>
+        <div class="table-wrap">
+          <table>
+            <thead>
+              <tr>
+                <th>対象</th>
+                <th>グループ</th>
+                <th>値</th>
+                <th>状態</th>
+                <th>メモ</th>
+              </tr>
+            </thead>
+            <tbody id="use-case-rows"></tbody>
+          </table>
+        </div>
+        <div class="result-columns">
+          <section aria-labelledby="findings-heading">
+            <h3 id="findings-heading">検出結果</h3>
+            <ul id="use-case-findings"></ul>
+          </section>
+          <section aria-labelledby="next-actions-heading">
+            <h3 id="next-actions-heading">次の確認</h3>
+            <ul id="use-case-actions"></ul>
+          </section>
+        </div>
+      </section>
+
       <section class="panel" aria-labelledby="run-setup-heading">
-        <h2 id="run-setup-heading">run setup</h2>
+        <h2 id="run-setup-heading">CSV 実行</h2>
         <label>
           employees CSV
           <input id="employees-csv" type="file" accept=".csv,text/csv" />
@@ -27,18 +68,18 @@
       </section>
 
       <section class="panel" aria-labelledby="progress-heading">
-        <h2 id="progress-heading">progress</h2>
+        <h2 id="progress-heading">進捗</h2>
         <progress id="run-progress" max="100" value="0"></progress>
         <p id="progress-message">CSV を選択してください。</p>
       </section>
 
       <section class="panel" aria-labelledby="artifact-heading">
-        <h2 id="artifact-heading">artifact list</h2>
+        <h2 id="artifact-heading">成果物一覧</h2>
         <ul id="artifact-list"></ul>
       </section>
 
       <section class="panel report" aria-labelledby="report-heading">
-        <h2 id="report-heading">Markdown report</h2>
+        <h2 id="report-heading">Markdown レポート</h2>
         <pre id="report-viewer"></pre>
       </section>
     </main>

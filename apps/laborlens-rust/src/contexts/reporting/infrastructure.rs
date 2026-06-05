@@ -161,10 +161,8 @@ mod tests {
     use std::path::PathBuf;
 
     fn temp_output_dir() -> PathBuf {
-        let dir = std::env::temp_dir().join(format!(
-            "laborlens-reporting-test-{}",
-            std::process::id()
-        ));
+        let dir =
+            std::env::temp_dir().join(format!("laborlens-reporting-test-{}", std::process::id()));
         if dir.exists() {
             fs::remove_dir_all(&dir).expect("old temp output dir should be removable");
         }
@@ -217,7 +215,14 @@ mod tests {
 
         let names: Vec<String> = written
             .iter()
-            .map(|artifact| artifact.path.file_name().unwrap().to_string_lossy().to_string())
+            .map(|artifact| {
+                artifact
+                    .path
+                    .file_name()
+                    .unwrap()
+                    .to_string_lossy()
+                    .to_string()
+            })
             .collect();
         assert_eq!(
             names,

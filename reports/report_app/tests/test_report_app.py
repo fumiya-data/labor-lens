@@ -89,6 +89,28 @@ class ReportAppTests(unittest.TestCase):
                         source=f"test fixture with {forbidden_key}",
                     )
 
+    def test_property_forbidden_raw_keys_are_rejected_at_any_nested_path(self):
+        base_report = json.loads(FIXTURE_PATH.read_text(encoding="utf-8"))
+        injections = [
+            ("artifact_manifest", "input_traces", 0),
+            ("run_summary",),
+            ("issues", 0),
+            ("profile_report", "profiles", 0),
+            ("profile_report", "suppression_summary", 0),
+        ]
+
+        for forbidden_key in FORBIDDEN_KEYS:
+            for path in injections:
+                candidate = copy.deepcopy(base_report)
+                target = candidate
+                for segment in path:
+                    target = target[segment]
+                target[forbidden_key] = "private"
+
+                with self.subTest(forbidden_key=forbidden_key, path=path):
+                    with self.assertRaises(PrivacyViolation):
+                        validate_public_report(candidate, source="nested property")
+
     def test_cli_processes_rust_smoke_pipe_input(self):
         fixture_text = FIXTURE_PATH.read_text(encoding="utf-8")
 

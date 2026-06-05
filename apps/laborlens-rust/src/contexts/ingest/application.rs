@@ -390,9 +390,7 @@ mod tests {
             employees_csv.push_str(&format!(
                 "{employee_id},従業員{index},operations,2024-04-01,在籍\n"
             ));
-            attendance_csv.push_str(&format!(
-                "{employee_id},2026-01-05,09:00,18:00,60\n"
-            ));
+            attendance_csv.push_str(&format!("{employee_id},2026-01-05,09:00,18:00,60\n"));
         }
 
         let result = run_ingest_workflow(IngestRunCommand::new(
@@ -413,5 +411,64 @@ mod tests {
         assert_eq!(result.row_counts.employee_rows, 10_000);
         assert_eq!(result.row_counts.attendance_rows, 10_000);
         assert!(result.issues.is_empty());
+    }
+
+    #[test]
+    fn property_generated_csv_counts_match_row_counts_and_fingerprints_are_stable() {
+        for row_count in 0..=32 {
+            let mut employees_csv = String::from("社員ID,氏名,部署,入社日,雇用状態\n");
+            let mut attendance_csv = String::from("社員ID,勤務日,出勤時刻,退勤時刻,休憩分\n");
+            for index in 1..=row_count {
+                let employee_id = format!("E{index:05}");
+                employees_csv.push_str(&format!(
+                    "{employee_id},従業員{index},operations,2024-04-01,在籍\n"
+                ));
+                attendance_csv.push_str(&format!("{employee_id},2026-01-05,09:00,18:00,60\n"));
+            }
+
+            let command = IngestRunCommand::new(
+                RunId::new(format!("run-property-{row_count:02}")),
+                crate::contexts::ingest::interfaces::CsvInput::new(
+                    DatasetKind::Employees,
+                    "property/employees.csv",
+                    employees_csv.clone(),
+                ),
+                crate::contexts::ingest::interfaces::CsvInput::new(
+                    DatasetKind::Attendance,
+                    "property/attendance.csv",
+                    attendance_csv.clone(),
+                ),
+            );
+            let repeat_command = IngestRunCommand::new(
+                RunId::new(format!("run-property-repeat-{row_count:02}")),
+                crate::contexts::ingest::interfaces::CsvInput::new(
+                    DatasetKind::Employees,
+                    "property/employees.csv",
+                    employees_csv,
+                ),
+                crate::contexts::ingest::interfaces::CsvInput::new(
+                    DatasetKind::Attendance,
+                    "property/attendance.csv",
+                    attendance_csv,
+                ),
+            );
+
+            let result = run_ingest_workflow(command);
+            let repeat = run_ingest_workflow(repeat_command);
+
+            assert_eq!(result.row_counts.employee_rows, row_count);
+            assert_eq!(result.row_counts.attendance_rows, row_count);
+            assert_eq!(result.input_refs[0].record_count, row_count);
+            assert_eq!(result.input_refs[1].record_count, row_count);
+            assert_eq!(
+                result.input_refs[0].fingerprint,
+                repeat.input_refs[0].fingerprint
+            );
+            assert_eq!(
+                result.input_refs[1].fingerprint,
+                repeat.input_refs[1].fingerprint
+            );
+            assert!(result.issues.is_empty());
+        }
     }
 }
