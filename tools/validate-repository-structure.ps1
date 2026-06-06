@@ -87,8 +87,13 @@ Assert-Exists "apps\laborlens-rust\src\contexts\guidance\mod.rs"
 Assert-Exists "apps\laborlens-local-server\Cargo.toml"
 Assert-Exists "apps\laborlens-local-server\src\lib.rs"
 Assert-Exists "apps\laborlens-local-ui\index.html"
-Assert-Exists "apps\laborlens-local-ui\src\app.js"
+Assert-Exists "apps\laborlens-local-ui\package.json"
+Assert-Exists "apps\laborlens-local-ui\vite.config.ts"
+Assert-Exists "apps\laborlens-local-ui\src\App.tsx"
+Assert-Exists "apps\laborlens-local-ui\src\api.ts"
+Assert-Exists "apps\laborlens-local-ui\src\main.tsx"
 Assert-Exists "apps\laborlens-local-ui\src\styles.css"
+Assert-Exists "apps\laborlens-local-ui\src-tauri\tauri.conf.json"
 Assert-Exists "fixtures\privacy\fatigue.csv"
 Assert-Exists "fixtures\scale\scale-seed.json"
 
@@ -125,7 +130,7 @@ Assert-FileContains "reports\README.md" "Python" "reports README explains Pike's
 Assert-FileContains "tools\README.md" "apps/laborlens-rust" "tools README keeps production logic out of utility scripts"
 Assert-FileContains "tools\README.md" "seed-demo-db.ps1" "tools README documents demo DB seeding"
 Assert-FileContains "crates\README.md" "retired" "crates README marks independent crate scaffolds as retired"
-Assert-FileContains "apps\laborlens-local-ui\src\app.js" "/api/runs" "local UI calls local server instead of reimplementing core logic"
+Assert-FileContains "apps\laborlens-local-ui\src\api.ts" "/api/runs" "local UI calls local server instead of reimplementing core logic"
 Assert-FileContains "apps\laborlens-local-server\src\lib.rs" "run_ingest_workflow" "local server calls the Rust monolith workflow"
 
 Assert-NoIndependentCrateScaffolds
