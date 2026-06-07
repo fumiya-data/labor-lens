@@ -1,5 +1,7 @@
 use laborlens_rust::contexts::ingest::application::run_ingest_workflow;
-use laborlens_rust::contexts::ingest::domain::{DatasetKind, IngestWorkflowResult, SchemaIssue};
+use laborlens_rust::contexts::ingest::domain::{
+    AttendanceRecord, DatasetKind, EmployeeRecord, IngestWorkflowResult,
+};
 use laborlens_rust::contexts::ingest::interfaces::{CsvInput, IngestRunCommand};
 use laborlens_rust::shared::db::postgres::PostgresCommandAdapter;
 use laborlens_rust::shared::db::{
@@ -233,6 +235,25 @@ pub struct RunHistoryItem {
 }
 
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+pub struct AttendanceReviewIssue {
+    pub issue_id: String,
+    pub run_id: String,
+    pub dataset_kind: String,
+    pub source_ref: String,
+    pub source_row_number: usize,
+    pub employee_id: String,
+    pub work_date: String,
+    pub store_name: String,
+    pub department_name: String,
+    pub issue_code: String,
+    pub issue_category: String,
+    pub severity: String,
+    pub status: String,
+    pub message: String,
+    pub suggested_action: String,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 pub struct AttendanceReviewRow {
     pub row_id: String,
     pub employee_id: String,
@@ -250,6 +271,9 @@ pub struct AttendanceReviewRow {
     pub severity: String,
     pub status: String,
     pub review_hint: String,
+    pub source_ref: String,
+    pub source_row_number: usize,
+    pub issues: Vec<AttendanceReviewIssue>,
 }
 
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
@@ -259,14 +283,26 @@ pub struct AttendanceReviewCount {
 }
 
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+pub struct AttendanceReviewGroupCount {
+    pub key: String,
+    pub count: usize,
+    pub row_count: usize,
+    pub issue_count: usize,
+    pub affected_row_count: usize,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 pub struct AttendanceReviewSummary {
+    pub run_id: Option<String>,
+    pub data_source: String,
     pub period_start: String,
     pub period_end: String,
     pub employee_count: usize,
     pub row_count: usize,
     pub issue_row_count: usize,
-    pub counts_by_store: Vec<AttendanceReviewCount>,
-    pub counts_by_department: Vec<AttendanceReviewCount>,
+    pub issue_count: usize,
+    pub counts_by_store: Vec<AttendanceReviewGroupCount>,
+    pub counts_by_department: Vec<AttendanceReviewGroupCount>,
     pub counts_by_severity: Vec<AttendanceReviewCount>,
     pub counts_by_status: Vec<AttendanceReviewCount>,
     pub counts_by_issue_type: Vec<AttendanceReviewCount>,
@@ -274,9 +310,18 @@ pub struct AttendanceReviewSummary {
 
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 pub struct AttendanceReviewRowsResponse {
+    pub run_id: Option<String>,
+    pub data_source: String,
     pub period_start: String,
     pub period_end: String,
     pub rows: Vec<AttendanceReviewRow>,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+pub struct AttendanceReviewIssuesResponse {
+    pub run_id: Option<String>,
+    pub data_source: String,
+    pub issues: Vec<AttendanceReviewIssue>,
 }
 
 impl LocalServer {
@@ -329,7 +374,38 @@ impl LocalServer {
             output_dir.join("artifact_manifest.json"),
             &artifact_list(result.run_id.as_str()),
         )?;
-        fs::write(output_dir.join("issues.csv"), issues_csv(&result.issues))?;
+        let review_rows = build_run_attendance_review_rows(result);
+        let review_summary = summarize_attendance_review_rows(
+            Some(result.run_id.as_str().to_string()),
+            "run".to_string(),
+            result.row_counts.employee_rows,
+            &review_rows,
+        );
+        let mut review_issues = schema_review_issues(result);
+        review_issues.extend(attendance_review_issues(&review_rows));
+        fs::write(output_dir.join("issues.csv"), issues_csv(&review_issues))?;
+        write_json(
+            output_dir.join("attendance_review_issues.json"),
+            &AttendanceReviewIssuesResponse {
+                run_id: Some(result.run_id.as_str().to_string()),
+                data_source: "run".to_string(),
+                issues: review_issues,
+            },
+        )?;
+        write_json(
+            output_dir.join("attendance_review_rows.json"),
+            &AttendanceReviewRowsResponse {
+                run_id: Some(result.run_id.as_str().to_string()),
+                data_source: "run".to_string(),
+                period_start: review_summary.period_start.clone(),
+                period_end: review_summary.period_end.clone(),
+                rows: review_rows,
+            },
+        )?;
+        write_json(
+            output_dir.join("attendance_review_summary.json"),
+            &review_summary,
+        )?;
         fs::write(
             output_dir.join("public_report.md"),
             public_report_markdown(result),
@@ -468,38 +544,72 @@ impl LocalServer {
         )
     }
 
-    pub fn attendance_review_summary(&self) -> AttendanceReviewSummary {
-        let rows = build_attendance_review_rows(self.demo_database.employees());
-        AttendanceReviewSummary {
-            period_start: attendance_review_period_start().to_string(),
-            period_end: attendance_review_period_end().to_string(),
-            employee_count: self.demo_database.employee_count(),
-            row_count: rows.len(),
-            issue_row_count: rows.iter().filter(|row| row.issue_type != "none").count(),
-            counts_by_store: count_attendance_review_values(&rows, |row| &row.store_name),
-            counts_by_department: count_attendance_review_values(&rows, |row| &row.department),
-            counts_by_severity: count_attendance_review_values(&rows, |row| &row.severity),
-            counts_by_status: count_attendance_review_values(&rows, |row| &row.status),
-            counts_by_issue_type: count_attendance_review_values(&rows, |row| &row.issue_type),
+    pub fn attendance_review_summary(&self, run_id: Option<&str>) -> AttendanceReviewSummary {
+        if let Some(run_id) = self.resolve_review_run_id(run_id) {
+            if let Some(summary) = self.read_run_review_summary(&run_id) {
+                return summary;
+            }
+        }
+        let rows = build_seed_attendance_review_rows(self.demo_database.employees());
+        summarize_attendance_review_rows(
+            None,
+            "seed".to_string(),
+            self.demo_database.employee_count(),
+            &rows,
+        )
+    }
+
+    pub fn attendance_review_rows_response(
+        &self,
+        run_id: Option<&str>,
+    ) -> AttendanceReviewRowsResponse {
+        if let Some(run_id) = self.resolve_review_run_id(run_id) {
+            if let Some(rows) = self.read_run_review_rows(&run_id) {
+                return rows;
+            }
+        }
+        let rows = build_seed_attendance_review_rows(self.demo_database.employees());
+        AttendanceReviewRowsResponse {
+            run_id: None,
+            data_source: "seed".to_string(),
+            period_start: attendance_review_period_start(&rows).to_string(),
+            period_end: attendance_review_period_end(&rows).to_string(),
+            rows,
         }
     }
 
-    pub fn attendance_review_rows_response(&self) -> AttendanceReviewRowsResponse {
-        AttendanceReviewRowsResponse {
-            period_start: attendance_review_period_start().to_string(),
-            period_end: attendance_review_period_end().to_string(),
-            rows: build_attendance_review_rows(self.demo_database.employees()),
+    pub fn attendance_review_issues_response(
+        &self,
+        run_id: Option<&str>,
+    ) -> AttendanceReviewIssuesResponse {
+        if let Some(run_id) = self.resolve_review_run_id(run_id) {
+            if let Some(issues) = self.read_run_review_issues(&run_id) {
+                return issues;
+            }
+        }
+        let rows = self.attendance_review_rows_response(run_id);
+        AttendanceReviewIssuesResponse {
+            run_id: rows.run_id,
+            data_source: rows.data_source,
+            issues: attendance_review_issues(&rows.rows),
         }
     }
 
     pub fn api_get(&self, path: &str) -> ApiResponse {
-        match path.trim_end_matches('/') {
+        let (endpoint, query) = split_api_path(path);
+        let run_id = query_param(query, "run_id");
+        match endpoint.trim_end_matches('/') {
             "/api/attendance-review/summary" => {
-                json_response(200, &self.attendance_review_summary())
+                json_response(200, &self.attendance_review_summary(run_id.as_deref()))
             }
-            "/api/attendance-review/rows" => {
-                json_response(200, &self.attendance_review_rows_response())
-            }
+            "/api/attendance-review/rows" => json_response(
+                200,
+                &self.attendance_review_rows_response(run_id.as_deref()),
+            ),
+            "/api/attendance-review/issues" => json_response(
+                200,
+                &self.attendance_review_issues_response(run_id.as_deref()),
+            ),
             "/api/use-cases" => json_response(200, &self.use_case_catalog()),
             "/api/runs" => self.run_history_response(),
             endpoint if endpoint.starts_with("/api/runs/") => {
@@ -540,23 +650,122 @@ impl LocalServer {
     }
 }
 
-fn attendance_review_period_start() -> &'static str {
+fn seed_attendance_review_period_start() -> &'static str {
     "2026-01-01"
 }
 
-fn attendance_review_period_end() -> &'static str {
+fn seed_attendance_review_period_end() -> &'static str {
     "2026-01-31"
 }
 
-fn build_attendance_review_rows(employees: &[DemoEmployee]) -> Vec<AttendanceReviewRow> {
+fn split_api_path(path: &str) -> (&str, Option<&str>) {
+    match path.split_once('?') {
+        Some((endpoint, query)) => (endpoint, Some(query)),
+        None => (path, None),
+    }
+}
+
+fn query_param(query: Option<&str>, name: &str) -> Option<String> {
+    query.and_then(|query| {
+        query.split('&').find_map(|part| {
+            let (key, value) = part.split_once('=')?;
+            if key == name && !value.is_empty() {
+                Some(percent_decode(value))
+            } else {
+                None
+            }
+        })
+    })
+}
+
+fn percent_decode(value: &str) -> String {
+    let mut output = String::new();
+    let bytes = value.as_bytes();
+    let mut index = 0;
+    while index < bytes.len() {
+        if bytes[index] == b'%' && index + 2 < bytes.len() {
+            if let Ok(hex) = u8::from_str_radix(&value[index + 1..index + 3], 16) {
+                output.push(hex as char);
+                index += 3;
+                continue;
+            }
+        }
+        output.push(if bytes[index] == b'+' {
+            ' '
+        } else {
+            bytes[index] as char
+        });
+        index += 1;
+    }
+    output
+}
+
+impl LocalServer {
+    fn resolve_review_run_id(&self, requested_run_id: Option<&str>) -> Option<String> {
+        if let Some(run_id) = requested_run_id.filter(|value| !value.trim().is_empty()) {
+            return Some(run_id.to_string());
+        }
+        latest_run_id(&self.artifact_root)
+    }
+
+    fn read_run_review_summary(&self, run_id: &str) -> Option<AttendanceReviewSummary> {
+        read_json(
+            self.artifact_root
+                .join(run_id)
+                .join("attendance_review_summary.json"),
+        )
+        .ok()
+    }
+
+    fn read_run_review_rows(&self, run_id: &str) -> Option<AttendanceReviewRowsResponse> {
+        read_json(
+            self.artifact_root
+                .join(run_id)
+                .join("attendance_review_rows.json"),
+        )
+        .ok()
+    }
+
+    fn read_run_review_issues(&self, run_id: &str) -> Option<AttendanceReviewIssuesResponse> {
+        read_json(
+            self.artifact_root
+                .join(run_id)
+                .join("attendance_review_issues.json"),
+        )
+        .ok()
+    }
+}
+
+fn latest_run_id(artifact_root: &Path) -> Option<String> {
+    let mut run_ids = fs::read_dir(artifact_root)
+        .ok()?
+        .flatten()
+        .filter_map(|entry| {
+            if entry.file_type().ok()?.is_dir() {
+                Some(entry.file_name().to_string_lossy().to_string())
+            } else {
+                None
+            }
+        })
+        .collect::<Vec<_>>();
+    run_ids.sort();
+    run_ids.pop()
+}
+
+fn read_json<T: for<'de> Deserialize<'de>>(path: impl AsRef<Path>) -> io::Result<T> {
+    let body = fs::read_to_string(path)?;
+    serde_json::from_str(&body).map_err(|error| io::Error::new(io::ErrorKind::InvalidData, error))
+}
+
+fn build_seed_attendance_review_rows(employees: &[DemoEmployee]) -> Vec<AttendanceReviewRow> {
     employees
         .iter()
         .enumerate()
-        .map(|(index, employee)| build_attendance_review_row(index, employee))
+        .map(|(index, employee)| build_seed_attendance_review_row(index, employee))
         .collect()
 }
 
-fn build_attendance_review_row(index: usize, employee: &DemoEmployee) -> AttendanceReviewRow {
+fn build_seed_attendance_review_row(index: usize, employee: &DemoEmployee) -> AttendanceReviewRow {
     let day = 1 + (index % 28);
     let work_date = format!("2026-01-{day:02}");
     let scheduled_clock_in = "09:00".to_string();
@@ -571,6 +780,32 @@ fn build_attendance_review_row(index: usize, employee: &DemoEmployee) -> Attenda
         status,
         review_hint,
     ) = attendance_review_issue_profile(index, employee);
+    let source_row_number = index + 2;
+    let issue = if issue_type == "none" {
+        Vec::new()
+    } else {
+        vec![AttendanceReviewIssue {
+            issue_id: format!("seed:{}:{}:{}", employee.employee_id, work_date, issue_type),
+            run_id: "seed".to_string(),
+            dataset_kind: "attendance_by_employee".to_string(),
+            source_ref: "seed:demo_japanese_employees.v1".to_string(),
+            source_row_number,
+            employee_id: employee.employee_id.clone(),
+            work_date: work_date.clone(),
+            store_name: employee.store_name.clone(),
+            department_name: employee.department.clone(),
+            issue_code: issue_type.to_string(),
+            issue_category: if issue_type.starts_with("master") {
+                "master_issue".to_string()
+            } else {
+                "data_quality_issue".to_string()
+            },
+            severity: severity.to_string(),
+            status: "open".to_string(),
+            message: review_hint.clone(),
+            suggested_action: review_hint.clone(),
+        }]
+    };
 
     AttendanceReviewRow {
         row_id: format!("att-review-{:04}", index + 1),
@@ -589,6 +824,290 @@ fn build_attendance_review_row(index: usize, employee: &DemoEmployee) -> Attenda
         severity: severity.to_string(),
         status: status.to_string(),
         review_hint,
+        source_ref: "seed:demo_japanese_employees.v1".to_string(),
+        source_row_number,
+        issues: issue,
+    }
+}
+
+fn build_run_attendance_review_rows(result: &IngestWorkflowResult) -> Vec<AttendanceReviewRow> {
+    let employees = result
+        .records
+        .employees
+        .iter()
+        .map(|employee| (employee.employee_id.as_str(), employee))
+        .collect::<BTreeMap<_, _>>();
+    let attendance_source = result
+        .input_refs
+        .iter()
+        .find(|input| input.dataset_id == DatasetKind::Attendance.dataset_id())
+        .map(|input| input.source_ref.as_str())
+        .unwrap_or("upload://attendance.csv");
+
+    result
+        .records
+        .attendance
+        .iter()
+        .enumerate()
+        .map(|(index, attendance)| {
+            build_run_attendance_review_row(
+                result.run_id.as_str(),
+                attendance_source,
+                index,
+                attendance,
+                employees.get(attendance.employee_id.as_str()).copied(),
+            )
+        })
+        .collect()
+}
+
+fn build_run_attendance_review_row(
+    run_id: &str,
+    source_ref: &str,
+    index: usize,
+    attendance: &AttendanceRecord,
+    employee: Option<&EmployeeRecord>,
+) -> AttendanceReviewRow {
+    let source_row_number = index + 2;
+    let display_name = employee
+        .map(|employee| employee.employee_name.clone())
+        .unwrap_or_else(|| "(従業員マスタ未照合)".to_string());
+    let department = employee
+        .map(|employee| employee.department.clone())
+        .unwrap_or_else(|| "未設定部門".to_string());
+    let store_name = "未設定店舗".to_string();
+    let worked_minutes = worked_minutes(attendance);
+    let mut issues = attendance_data_quality_issues(
+        run_id,
+        source_ref,
+        source_row_number,
+        attendance,
+        &store_name,
+        &department,
+        worked_minutes,
+    );
+    if employee.is_none() {
+        issues.push(AttendanceReviewIssue {
+            issue_id: format!("{run_id}:attendance:{source_row_number}:missing_employee"),
+            run_id: run_id.to_string(),
+            dataset_kind: "attendance_by_employee".to_string(),
+            source_ref: source_ref.to_string(),
+            source_row_number,
+            employee_id: attendance.employee_id.clone(),
+            work_date: attendance.work_date.clone(),
+            store_name: store_name.clone(),
+            department_name: department.clone(),
+            issue_code: "missing_employee".to_string(),
+            issue_category: "master_issue".to_string(),
+            severity: "high".to_string(),
+            status: "open".to_string(),
+            message: "勤怠行の社員IDが従業員マスタに見つかりません。".to_string(),
+            suggested_action: "社員ID、従業員マスタ、取込対象ファイルを確認してください。"
+                .to_string(),
+        });
+    }
+    let severity = highest_issue_severity(&issues)
+        .map(str::to_string)
+        .unwrap_or_else(|| "info".to_string());
+    let issue_type = if issues.is_empty() {
+        "none".to_string()
+    } else {
+        issues[0].issue_code.clone()
+    };
+    let issue_label = if issues.is_empty() {
+        "問題なし".to_string()
+    } else {
+        issue_code_label(&issue_type).to_string()
+    };
+    let status = if issues.iter().any(|issue| issue.severity == "critical") {
+        "blocked"
+    } else if issues.is_empty() {
+        "ok"
+    } else {
+        "needs_review"
+    };
+    let review_hint = if issues.is_empty() {
+        "通常勤務として確認できます。".to_string()
+    } else {
+        issues
+            .iter()
+            .map(|issue| issue.suggested_action.as_str())
+            .collect::<Vec<_>>()
+            .join(" / ")
+    };
+
+    AttendanceReviewRow {
+        row_id: format!("{run_id}:attendance:{source_row_number}"),
+        employee_id: attendance.employee_id.clone(),
+        display_name,
+        store_name,
+        department,
+        work_date: attendance.work_date.clone(),
+        clock_in: empty_to_none(&attendance.clock_in),
+        clock_out: empty_to_none(&attendance.clock_out),
+        scheduled_clock_in: "09:00".to_string(),
+        scheduled_clock_out: "18:00".to_string(),
+        worked_minutes,
+        issue_type,
+        issue_label,
+        severity,
+        status: status.to_string(),
+        review_hint,
+        source_ref: source_ref.to_string(),
+        source_row_number,
+        issues,
+    }
+}
+
+fn attendance_data_quality_issues(
+    run_id: &str,
+    source_ref: &str,
+    source_row_number: usize,
+    attendance: &AttendanceRecord,
+    store_name: &str,
+    department_name: &str,
+    worked_minutes: Option<u16>,
+) -> Vec<AttendanceReviewIssue> {
+    let mut issues = Vec::new();
+    if attendance.clock_in.trim().is_empty() {
+        issues.push(attendance_issue(
+            run_id,
+            source_ref,
+            source_row_number,
+            attendance,
+            store_name,
+            department_name,
+            "missing_clock_in",
+            "data_quality_issue",
+            "high",
+            "出勤時刻が空です。",
+            "出勤打刻の原票または店舗修正依頼を確認してください。",
+        ));
+    }
+    if attendance.clock_out.trim().is_empty() {
+        issues.push(attendance_issue(
+            run_id,
+            source_ref,
+            source_row_number,
+            attendance,
+            store_name,
+            department_name,
+            "missing_clock_out",
+            "data_quality_issue",
+            "high",
+            "退勤時刻が空です。",
+            "退勤打刻の原票または店舗修正依頼を確認してください。",
+        ));
+    }
+    if !attendance.clock_in.trim().is_empty()
+        && !attendance.clock_out.trim().is_empty()
+        && attendance.clock_out.as_str() < attendance.clock_in.as_str()
+    {
+        issues.push(attendance_issue(
+            run_id,
+            source_ref,
+            source_row_number,
+            attendance,
+            store_name,
+            department_name,
+            "time_reversal",
+            "data_quality_issue",
+            "critical",
+            "出勤時刻と退勤時刻の前後関係が逆転しています。",
+            "出勤時刻と退勤時刻を修正するまで集計対象外として確認してください。",
+        ));
+    }
+    if worked_minutes.is_some_and(|minutes| minutes > 14 * 60) {
+        issues.push(attendance_issue(
+            run_id,
+            source_ref,
+            source_row_number,
+            attendance,
+            store_name,
+            department_name,
+            "long_hours_candidate",
+            "business_check",
+            "medium",
+            "長時間勤務の候補です。",
+            "休憩・残業申請・勤務実態を確認してください。",
+        ));
+    }
+    issues
+}
+
+fn attendance_issue(
+    run_id: &str,
+    source_ref: &str,
+    source_row_number: usize,
+    attendance: &AttendanceRecord,
+    store_name: &str,
+    department_name: &str,
+    issue_code: &str,
+    issue_category: &str,
+    severity: &str,
+    message: &str,
+    suggested_action: &str,
+) -> AttendanceReviewIssue {
+    AttendanceReviewIssue {
+        issue_id: format!("{run_id}:attendance:{source_row_number}:{issue_code}"),
+        run_id: run_id.to_string(),
+        dataset_kind: "attendance_by_employee".to_string(),
+        source_ref: source_ref.to_string(),
+        source_row_number,
+        employee_id: attendance.employee_id.clone(),
+        work_date: attendance.work_date.clone(),
+        store_name: store_name.to_string(),
+        department_name: department_name.to_string(),
+        issue_code: issue_code.to_string(),
+        issue_category: issue_category.to_string(),
+        severity: severity.to_string(),
+        status: "open".to_string(),
+        message: message.to_string(),
+        suggested_action: suggested_action.to_string(),
+    }
+}
+
+fn empty_to_none(value: &str) -> Option<String> {
+    let value = value.trim();
+    if value.is_empty() {
+        None
+    } else {
+        Some(value.to_string())
+    }
+}
+
+fn worked_minutes(attendance: &AttendanceRecord) -> Option<u16> {
+    let start = parse_hhmm(&attendance.clock_in)?;
+    let end = parse_hhmm(&attendance.clock_out)?;
+    if end < start {
+        return None;
+    }
+    let break_minutes = attendance.break_minutes.unwrap_or(60);
+    end.checked_sub(start)?
+        .checked_sub(break_minutes)?
+        .try_into()
+        .ok()
+}
+
+fn parse_hhmm(value: &str) -> Option<u32> {
+    let (hours, minutes) = value.trim().split_once(':')?;
+    let hours = hours.parse::<u32>().ok()?;
+    let minutes = minutes.parse::<u32>().ok()?;
+    if hours <= 23 && minutes <= 59 {
+        Some(hours * 60 + minutes)
+    } else {
+        None
+    }
+}
+
+fn issue_code_label(issue_code: &str) -> &str {
+    match issue_code {
+        "missing_clock_in" => "出勤打刻漏れ",
+        "missing_clock_out" => "退勤打刻漏れ",
+        "time_reversal" => "時刻逆転",
+        "long_hours_candidate" => "長時間勤務候補",
+        "missing_employee" => "従業員マスタ未登録",
+        _ => issue_code,
     }
 }
 
@@ -715,6 +1234,150 @@ fn count_attendance_review_values(
         .into_iter()
         .map(|(key, count)| AttendanceReviewCount { key, count })
         .collect()
+}
+
+fn summarize_attendance_review_rows(
+    run_id: Option<String>,
+    data_source: String,
+    employee_count: usize,
+    rows: &[AttendanceReviewRow],
+) -> AttendanceReviewSummary {
+    AttendanceReviewSummary {
+        run_id,
+        period_start: if data_source == "seed" {
+            seed_attendance_review_period_start()
+        } else {
+            attendance_review_period_start(rows)
+        }
+        .to_string(),
+        period_end: if data_source == "seed" {
+            seed_attendance_review_period_end()
+        } else {
+            attendance_review_period_end(rows)
+        }
+        .to_string(),
+        data_source,
+        employee_count,
+        row_count: rows.len(),
+        issue_row_count: rows.iter().filter(|row| !row.issues.is_empty()).count(),
+        issue_count: rows.iter().map(|row| row.issues.len()).sum(),
+        counts_by_store: count_attendance_review_groups(rows, |row| &row.store_name),
+        counts_by_department: count_attendance_review_groups(rows, |row| &row.department),
+        counts_by_severity: count_attendance_review_issues(rows, |issue| &issue.severity),
+        counts_by_status: count_attendance_review_values(rows, |row| &row.status),
+        counts_by_issue_type: count_attendance_review_issues(rows, |issue| &issue.issue_code),
+    }
+}
+
+fn attendance_review_period_start(rows: &[AttendanceReviewRow]) -> &str {
+    rows.iter()
+        .map(|row| row.work_date.as_str())
+        .min()
+        .unwrap_or_else(|| seed_attendance_review_period_start())
+}
+
+fn attendance_review_period_end(rows: &[AttendanceReviewRow]) -> &str {
+    rows.iter()
+        .map(|row| row.work_date.as_str())
+        .max()
+        .unwrap_or_else(|| seed_attendance_review_period_end())
+}
+
+fn count_attendance_review_issues(
+    rows: &[AttendanceReviewRow],
+    value: impl Fn(&AttendanceReviewIssue) -> &str,
+) -> Vec<AttendanceReviewCount> {
+    let mut counts = BTreeMap::new();
+    for issue in rows.iter().flat_map(|row| row.issues.iter()) {
+        *counts.entry(value(issue).to_string()).or_insert(0) += 1;
+    }
+    counts
+        .into_iter()
+        .map(|(key, count)| AttendanceReviewCount { key, count })
+        .collect()
+}
+
+fn count_attendance_review_groups(
+    rows: &[AttendanceReviewRow],
+    value: impl Fn(&AttendanceReviewRow) -> &str,
+) -> Vec<AttendanceReviewGroupCount> {
+    let mut groups = BTreeMap::<String, (usize, usize, usize)>::new();
+    for row in rows {
+        let entry = groups.entry(value(row).to_string()).or_insert((0, 0, 0));
+        entry.0 += 1;
+        entry.1 += row.issues.len();
+        if !row.issues.is_empty() {
+            entry.2 += 1;
+        }
+    }
+    groups
+        .into_iter()
+        .map(
+            |(key, (row_count, issue_count, affected_row_count))| AttendanceReviewGroupCount {
+                key,
+                count: issue_count,
+                row_count,
+                issue_count,
+                affected_row_count,
+            },
+        )
+        .collect()
+}
+
+fn attendance_review_issues(rows: &[AttendanceReviewRow]) -> Vec<AttendanceReviewIssue> {
+    rows.iter()
+        .flat_map(|row| row.issues.iter().cloned())
+        .collect()
+}
+
+fn schema_review_issues(result: &IngestWorkflowResult) -> Vec<AttendanceReviewIssue> {
+    result
+        .issues
+        .iter()
+        .map(|issue| AttendanceReviewIssue {
+            issue_id: issue.issue_id.clone(),
+            run_id: result.run_id.as_str().to_string(),
+            dataset_kind: issue.dataset_id.clone(),
+            source_ref: issue.source_ref.clone(),
+            source_row_number: 0,
+            employee_id: String::new(),
+            work_date: String::new(),
+            store_name: String::new(),
+            department_name: String::new(),
+            issue_code: match &issue.issue_kind {
+                laborlens_rust::contexts::ingest::domain::SchemaIssueKind::MissingRequiredHeader => {
+                    "missing_required_header"
+                }
+                laborlens_rust::contexts::ingest::domain::SchemaIssueKind::CsvReadError => {
+                    "csv_read_error"
+                }
+            }
+            .to_string(),
+            issue_category: "schema_issue".to_string(),
+            severity: "critical".to_string(),
+            status: "open".to_string(),
+            message: issue.message.clone(),
+            suggested_action: "CSVのヘッダーまたは形式を修正して再確認してください。".to_string(),
+        })
+        .collect()
+}
+
+fn highest_issue_severity(issues: &[AttendanceReviewIssue]) -> Option<&str> {
+    issues
+        .iter()
+        .map(|issue| issue.severity.as_str())
+        .max_by_key(|severity| severity_rank(severity))
+}
+
+fn severity_rank(severity: &str) -> usize {
+    match severity {
+        "critical" => 5,
+        "high" => 4,
+        "medium" => 3,
+        "low" => 2,
+        "info" => 1,
+        _ => 0,
+    }
 }
 
 fn db_commands_for_result(result: &IngestWorkflowResult) -> Vec<SqlCommand> {
@@ -888,16 +1551,28 @@ fn write_json(path: impl AsRef<Path>, value: &impl Serialize) -> io::Result<()> 
     fs::write(path, json)
 }
 
-fn issues_csv(issues: &[SchemaIssue]) -> String {
-    let mut output = String::from("issue_id,dataset_id,source_ref,issue_kind,message\n");
+fn issues_csv(issues: &[AttendanceReviewIssue]) -> String {
+    let mut output = String::from(
+        "issue_id,run_id,dataset_kind,source_ref,source_row_number,employee_id,work_date,store_name,department_name,issue_code,issue_category,severity,status,message,suggested_action\n",
+    );
     for issue in issues {
         output.push_str(&format!(
-            "{},{},{},{:?},{}\n",
+            "{},{},{},{},{},{},{},{},{},{},{},{},{},{},{}\n",
             csv_escape(&issue.issue_id),
-            csv_escape(&issue.dataset_id),
+            csv_escape(&issue.run_id),
+            csv_escape(&issue.dataset_kind),
             csv_escape(&issue.source_ref),
-            issue.issue_kind,
-            csv_escape(&issue.message)
+            issue.source_row_number,
+            csv_escape(&issue.employee_id),
+            csv_escape(&issue.work_date),
+            csv_escape(&issue.store_name),
+            csv_escape(&issue.department_name),
+            csv_escape(&issue.issue_code),
+            csv_escape(&issue.issue_category),
+            csv_escape(&issue.severity),
+            csv_escape(&issue.status),
+            csv_escape(&issue.message),
+            csv_escape(&issue.suggested_action)
         ));
     }
     output
@@ -1503,14 +2178,15 @@ mod tests {
     #[test]
     fn attendance_review_summary_counts_seeded_monthly_issue_mix() {
         let server = LocalServer::default();
-        let summary = server.attendance_review_summary();
+        let summary = server.attendance_review_summary(Some("seed-fallback-only"));
 
         assert_eq!(summary.period_start, "2026-01-01");
         assert_eq!(summary.period_end, "2026-01-31");
         assert_eq!(summary.employee_count, 1_000);
         assert_eq!(summary.row_count, 1_000);
         assert_eq!(summary.issue_row_count, 100);
-        assert_eq!(count_for(&summary.counts_by_issue_type, "none"), Some(900));
+        assert_eq!(summary.issue_count, 100);
+        assert_eq!(count_for(&summary.counts_by_issue_type, "none"), None);
         assert_eq!(
             count_for(&summary.counts_by_issue_type, "missing_clock_in"),
             Some(25)
@@ -1557,16 +2233,86 @@ mod tests {
     fn attendance_review_api_routes_return_summary_and_rows() {
         let server = LocalServer::default();
 
-        let summary = server.api_get("/api/attendance-review/summary");
+        let summary = server.api_get("/api/attendance-review/summary?run_id=seed-fallback-only");
         assert_eq!(summary.status_code, 200);
         assert!(summary.body.contains("\"row_count\":1000"));
         assert!(summary.body.contains("missing_clock_in"));
 
-        let rows = server.api_get("/api/attendance-review/rows");
+        let rows = server.api_get("/api/attendance-review/rows?run_id=seed-fallback-only");
         assert_eq!(rows.status_code, 200);
         assert!(rows.body.contains("\"rows\""));
         assert!(rows.body.contains("\"row_id\":\"att-review-0001\""));
         assert!(rows.body.contains("master_inactive_employee_candidate"));
+    }
+
+    #[test]
+    fn run_attendance_review_counts_issues_not_only_rows() {
+        let server = LocalServer::default();
+        let response = server.start_run_from_csv_contents(
+            "社員ID,氏名,部署\nEMP-0001,佐藤 陽菜,営業部\n",
+            "社員ID,勤務日,出勤時刻,退勤時刻\nEMP-0001,2026-01-01,,\n",
+        );
+
+        let summary = server.attendance_review_summary(Some(response.run_id.as_str()));
+        assert_eq!(summary.row_count, 1);
+        assert_eq!(summary.issue_count, 2);
+        assert_eq!(summary.issue_row_count, 1);
+        assert_eq!(summary.counts_by_store[0].issue_count, 2);
+        assert_eq!(summary.counts_by_store[0].affected_row_count, 1);
+
+        let rows = server.attendance_review_rows_response(Some(response.run_id.as_str()));
+        assert_eq!(rows.rows.len(), 1);
+        assert_eq!(rows.rows[0].issues.len(), 2);
+        assert!(rows.rows[0]
+            .issues
+            .iter()
+            .any(|issue| issue.issue_code == "missing_clock_in"));
+        assert!(rows.rows[0]
+            .issues
+            .iter()
+            .any(|issue| issue.issue_code == "missing_clock_out"));
+    }
+
+    #[test]
+    fn issues_csv_uses_traceable_review_columns() {
+        let server = LocalServer::default();
+        let response = server.start_run_from_csv_contents(
+            "社員ID,氏名,部署\nEMP-0001,佐藤 陽菜,営業部\n",
+            "社員ID,勤務日,出勤時刻,退勤時刻\nEMP-0001,2026-01-01,,18:00\n",
+        );
+
+        let issues = server.artifact_response(response.run_id.as_str(), "issues.csv");
+        assert_eq!(issues.status_code, 200);
+        assert!(issues.body.starts_with("issue_id,run_id,dataset_kind,source_ref,source_row_number,employee_id,work_date,store_name,department_name,issue_code,issue_category,severity,status,message,suggested_action"));
+        assert!(issues.body.contains(response.run_id.as_str()));
+        assert!(issues.body.contains(",2,EMP-0001,2026-01-01,"));
+        assert!(issues.body.contains("missing_clock_in"));
+        assert!(issues.body.contains(",high,open,"));
+    }
+
+    #[test]
+    fn attendance_review_api_can_read_run_artifacts_by_run_id() {
+        let server = LocalServer::default();
+        let response = server.start_run_from_csv_contents(
+            "社員ID,氏名,部署\nEMP-0001,佐藤 陽菜,営業部\n",
+            "社員ID,勤務日,出勤時刻,退勤時刻\nEMP-0001,2026-01-01,18:00,09:00\n",
+        );
+
+        let summary = server.api_get(&format!(
+            "/api/attendance-review/summary?run_id={}",
+            response.run_id.as_str()
+        ));
+        assert_eq!(summary.status_code, 200);
+        assert!(summary.body.contains("\"issue_count\":1"));
+        assert!(summary.body.contains("\"affected_row_count\":1"));
+
+        let rows = server.api_get(&format!(
+            "/api/attendance-review/rows?run_id={}",
+            response.run_id.as_str()
+        ));
+        assert_eq!(rows.status_code, 200);
+        assert!(rows.body.contains("time_reversal"));
+        assert!(rows.body.contains("\"source_row_number\":2"));
     }
 
     #[test]

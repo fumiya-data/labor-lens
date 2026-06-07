@@ -21,6 +21,12 @@ export type PreviewConfig = {
   columns: string[];
   rows: PreviewRow[];
   note: string;
+  detailSections: PreviewDetailSection[];
+};
+
+export type PreviewDetailSection = {
+  heading: string;
+  items: Array<[string, string]>;
 };
 
 export function getModePreview(
@@ -273,6 +279,7 @@ function preview(
   rows: PreviewRow[],
   note: string,
 ): PreviewConfig {
+  const primaryRow = rows[0];
   return {
     metrics,
     filters,
@@ -280,6 +287,32 @@ function preview(
     columns,
     rows,
     note,
+    detailSections: [
+      {
+        heading: "対象",
+        items: [
+          ["画面", tableTitle],
+          ["主な対象", primaryRow?.cells[0] ?? "-"],
+          ["状態", primaryRow?.status ?? "-"],
+        ],
+      },
+      {
+        heading: "確認内容",
+        items: [
+          ["絞り込み", filters.join(" / ") || "-"],
+          ["表示列", columns.slice(0, 3).join(" / ") || "-"],
+          ["件数", `${rows.length}件のサンプル`],
+        ],
+      },
+      {
+        heading: "入力元",
+        items: [
+          ["データ", "CSV run 成果物"],
+          ["表示", "画面案"],
+          ["次の確認", note],
+        ],
+      },
+    ],
   };
 }
 

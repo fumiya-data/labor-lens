@@ -16,6 +16,7 @@ import type {
 } from "./types";
 
 const apiBase = import.meta.env.VITE_LABORLENS_API_BASE ?? "";
+export const DEMO_ATTENDANCE_REVIEW_RUN_ID = "seed";
 
 async function fetchJson<T>(path: string, init?: RequestInit): Promise<T> {
   const response = await fetch(`${apiBase}${path}`, init);
@@ -42,8 +43,14 @@ export function getUseCaseSample(useCaseId: string): Promise<UseCaseSampleRespon
   );
 }
 
-export function getAttendanceReviewSummary(): Promise<AttendanceReviewSummaryResponse> {
-  return fetchJson<RawAttendanceReviewSummary>("/api/attendance-review/summary").then((summary) => ({
+export function getAttendanceReviewSummary(runId?: string): Promise<AttendanceReviewSummaryResponse> {
+  const path = `/api/attendance-review/summary${runId ? `?run_id=${encodeURIComponent(runId)}` : ""}`;
+  return fetchJson<RawAttendanceReviewSummary>(path).then((summary) => ({
+    run_id: summary.run_id ?? undefined,
+    generated_at:
+      summary.data_source === "seed"
+        ? "seed: demo_japanese_employees.v1"
+        : summary.run_id ?? undefined,
     period_start: summary.period_start,
     period_end: summary.period_end,
     total_rows: summary.row_count,
@@ -57,7 +64,7 @@ export function getAttendanceReviewSummary(): Promise<AttendanceReviewSummaryRes
         value: summary.employee_count,
         unit: "人",
         status: "clean",
-        helper_text: "seed 従業員マスタ",
+        helper_text: summary.data_source === "seed" ? "seed 従業員マスタ" : "CSV run",
       },
       {
         key: "rows",
@@ -70,10 +77,10 @@ export function getAttendanceReviewSummary(): Promise<AttendanceReviewSummaryRes
       {
         key: "issues",
         label: "要確認",
-        value: summary.issue_row_count,
+        value: summary.issue_count ?? summary.issue_row_count,
         unit: "件",
         status: summary.issue_row_count > 0 ? "issue" : "clean",
-        helper_text: "給与計算前の確認対象",
+        helper_text: "給与計算前のissue件数",
       },
       {
         key: "clean",
@@ -96,24 +103,26 @@ export function getAttendanceReviewSummary(): Promise<AttendanceReviewSummaryRes
       id: count.key,
       name: count.key,
       employee_count: 0,
-      row_count: count.count,
-      issue_count: 0,
+      row_count: count.row_count ?? count.count,
+      issue_count: count.issue_count ?? count.count,
     })),
     department_counts: summary.counts_by_department.map((count) => ({
       id: count.key,
       name: count.key,
       employee_count: 0,
-      row_count: count.count,
-      issue_count: 0,
+      row_count: count.row_count ?? count.count,
+      issue_count: count.issue_count ?? count.count,
     })),
   }));
 }
 
 export function getAttendanceReviewRows(
   query: AttendanceReviewRowsQuery = {},
+  runId?: string,
 ): Promise<AttendanceReviewRowsResponse> {
+  const effectiveQuery = { ...query, run_id: runId };
   return fetchJson<RawAttendanceReviewRowsResponse>(
-    `/api/attendance-review/rows${toQueryString(query)}`,
+    `/api/attendance-review/rows${toQueryString(effectiveQuery)}`,
   ).then((response) => {
     const rows = response.rows
       .map((row, index) => normalizeAttendanceReviewRow(row, index))
@@ -204,14 +213,20 @@ function toQueryString(query: AttendanceReviewRowsQuery): string {
 type RawAttendanceReviewCount = {
   key: string;
   count: number;
+  row_count?: number;
+  issue_count?: number;
+  affected_row_count?: number;
 };
 
 type RawAttendanceReviewSummary = {
+  run_id?: string | null;
+  data_source?: string;
   period_start: string;
   period_end: string;
   employee_count: number;
   row_count: number;
   issue_row_count: number;
+  issue_count?: number;
   counts_by_store: RawAttendanceReviewCount[];
   counts_by_department: RawAttendanceReviewCount[];
   counts_by_severity: RawAttendanceReviewCount[];
@@ -236,18 +251,44 @@ type RawAttendanceReviewRow = {
   severity: string;
   status: string;
   review_hint: string;
+  source_ref?: string;
+  source_row_number?: number;
+  issues?: RawAttendanceReviewIssue[];
 };
 
 type RawAttendanceReviewRowsResponse = {
+  run_id?: string | null;
+  data_source?: string;
   period_start: string;
   period_end: string;
   rows: RawAttendanceReviewRow[];
 };
 
+type RawAttendanceReviewIssue = {
+  issue_id: string;
+  run_id?: string;
+  dataset_kind?: string;
+  source_ref?: string;
+  source_row_number?: number;
+  employee_id?: string;
+  work_date?: string;
+  store_name?: string;
+  department_name?: string;
+  issue_code: string;
+  issue_category?: string;
+  category?: string;
+  severity: string;
+  status: string;
+  message: string;
+  suggested_action?: string;
+};
+
 function normalizeAttendanceReviewRow(row: RawAttendanceReviewRow, index: number): AttendanceReviewRow {
   const status = normalizeRowStatus(row.status);
   const severity = normalizeSeverity(row.severity);
-  const issueCount = row.issue_type === "none" ? 0 : 1;
+  const rawIssues = row.issues ?? [];
+  const normalizedIssues = rawIssues.map((issue) => normalizeAttendanceReviewIssue(issue, row, index));
+  const issueCount = rawIssues.length > 0 ? rawIssues.length : row.issue_type === "none" ? 0 : 1;
   return {
     row_id: row.row_id,
     employee_id: row.employee_id,
@@ -260,7 +301,7 @@ function normalizeAttendanceReviewRow(row: RawAttendanceReviewRow, index: number
     status,
     highest_severity: severity,
     issue_count: issueCount,
-    issue_codes: issueCount ? [row.issue_type] : [],
+    issue_codes: rawIssues.length > 0 ? rawIssues.map((issue) => issue.issue_code) : issueCount ? [row.issue_type] : [],
     scheduled_start: row.scheduled_clock_in,
     scheduled_end: row.scheduled_clock_out,
     clock_in: row.clock_in ?? undefined,
@@ -268,8 +309,8 @@ function normalizeAttendanceReviewRow(row: RawAttendanceReviewRow, index: number
     break_minutes: row.worked_minutes === null ? undefined : 60,
     actual_minutes: row.worked_minutes ?? undefined,
     overtime_minutes: row.worked_minutes === null ? undefined : Math.max(0, row.worked_minutes - 480),
-    source_file_name: "seed:demo_japanese_employees.v1",
-    source_row_number: index + 2,
+    source_file_name: row.source_ref ?? "seed:demo_japanese_employees.v1",
+    source_row_number: row.source_row_number ?? index + 2,
     search_text: [
       row.employee_id,
       row.display_name,
@@ -279,7 +320,9 @@ function normalizeAttendanceReviewRow(row: RawAttendanceReviewRow, index: number
       row.issue_label,
       row.issue_type,
     ].join(" ").toLowerCase(),
-    issues: issueCount
+    issues: rawIssues.length > 0
+      ? normalizedIssues
+      : issueCount
       ? [
           {
             issue_id: `${row.row_id}-${row.issue_type}`,
@@ -289,12 +332,44 @@ function normalizeAttendanceReviewRow(row: RawAttendanceReviewRow, index: number
             severity,
             title: row.issue_label,
             message: row.review_hint,
-            source_row_number: index + 2,
+            source_row_number: row.source_row_number ?? index + 2,
             suggested_action: row.review_hint,
           },
         ]
       : [],
   };
+}
+
+function normalizeAttendanceReviewIssue(
+  issue: RawAttendanceReviewIssue,
+  row: RawAttendanceReviewRow,
+  index: number,
+) {
+  const issueCode = issue.issue_code;
+  return {
+    issue_id: issue.issue_id,
+    issue_code: issueCode,
+    category: issue.issue_category ?? issue.category ?? "data_quality_issue",
+    status: normalizeIssueStatus(issue.status),
+    severity: normalizeSeverity(issue.severity),
+    title: issueCode,
+    message: issue.message,
+    source_row_number: issue.source_row_number ?? row.source_row_number ?? index + 2,
+    suggested_action: issue.suggested_action,
+  };
+}
+
+function normalizeIssueStatus(value: string): AttendanceReviewIssueStatus {
+  if (
+    value === "open" ||
+    value === "needs_review" ||
+    value === "acknowledged" ||
+    value === "resolved" ||
+    value === "suppressed"
+  ) {
+    return value;
+  }
+  return "open";
 }
 
 function normalizeRowStatus(value: string): AttendanceReviewRowStatus {

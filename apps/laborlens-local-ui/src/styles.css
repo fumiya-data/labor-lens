@@ -96,6 +96,47 @@ input[type="file"] {
   min-height: 40px;
 }
 
+.date-filter-control {
+  display: block;
+  position: relative;
+}
+
+.date-filter-control input[type="text"] {
+  padding-right: 42px;
+}
+
+.calendar-icon-button {
+  background: transparent;
+  border-color: transparent;
+  color: var(--text-muted);
+  height: 30px;
+  min-height: 30px;
+  min-width: 30px;
+  padding: 0;
+  position: absolute;
+  right: 4px;
+  top: 50%;
+  transform: translateY(-50%);
+  width: 30px;
+}
+
+.calendar-icon-button:hover {
+  background: var(--surface-muted);
+  border-color: var(--border-strong);
+  color: var(--blue);
+}
+
+.date-picker-proxy {
+  height: 1px;
+  opacity: 0;
+  padding: 0;
+  pointer-events: none;
+  position: absolute;
+  right: 0;
+  top: 100%;
+  width: 1px;
+}
+
 textarea {
   min-height: 104px;
   resize: vertical;
@@ -157,11 +198,16 @@ label {
   background: var(--surface-muted);
   box-shadow: none;
   margin-top: -8px;
+  padding-block: 6px;
 }
 
 .mode-nav button,
 .submode-nav button {
   min-height: 34px;
+}
+
+.submode-nav button {
+  min-width: 108px;
 }
 
 .mode-nav button.is-active,
@@ -536,6 +582,17 @@ th:first-child,
 .guide-answer ul {
   margin: 0;
   padding-left: 20px;
+}
+
+.result-columns dl {
+  display: grid;
+  gap: 8px;
+  margin: 0;
+}
+
+.result-columns dd {
+  margin: 0;
+  overflow-wrap: anywhere;
 }
 
 .result-columns li + li,

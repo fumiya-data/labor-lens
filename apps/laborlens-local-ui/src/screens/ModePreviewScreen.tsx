@@ -33,11 +33,35 @@ export function ModePreviewScreen({
             />
           ))}
         </div>
+        <div className="result-columns">
+          <CountList
+            heading="確認対象"
+            items={preview.metrics.map((metric) => ({
+              key: metric.label,
+              label: metric.label,
+              count: metric.value,
+              unit: metric.unit,
+            }))}
+          />
+          <CountList
+            heading="状態別"
+            items={preview.rows.map((row, index) => ({
+              key: `${row.status}-${index}`,
+              label: statusLabel(row.status),
+              count: 1,
+            }))}
+          />
+        </div>
       </section>
 
       <section className="review-layout" aria-label={`${mode.title} 画面案`}>
         <aside className="panel filter-panel">
-          <h2>絞り込み</h2>
+          <div className="panel-header">
+            <h2>絞り込み</h2>
+            <button type="button" disabled>
+              クリア
+            </button>
+          </div>
           {preview.filters.map((filter) => (
             <label key={filter}>
               {filter}
@@ -76,6 +100,94 @@ export function ModePreviewScreen({
           <p className="muted">{preview.note}</p>
         </section>
       </section>
+
+      <section className="panel" aria-labelledby={`${mode.id}-detail-heading`}>
+        <div className="panel-header">
+          <h2 id={`${mode.id}-detail-heading`}>選んだ行の詳細</h2>
+          <span className="status-chip">{statusLabel(preview.rows[0]?.status)}</span>
+        </div>
+        <div className="result-columns">
+          {preview.detailSections.map((section) => (
+            <DetailList heading={section.heading} items={section.items} key={section.heading} />
+          ))}
+        </div>
+        <div className="table-wrap">
+          <table>
+            <thead>
+              <tr>
+                <th>状態</th>
+                <th>内容</th>
+                <th>次の確認</th>
+              </tr>
+            </thead>
+            <tbody>
+              <tr>
+                <td>{statusLabel(preview.rows[0]?.status)}</td>
+                <td>
+                  <strong>{preview.rows[0]?.cells[0] ?? mode.title}</strong>
+                  <p className="muted">{preview.note}</p>
+                </td>
+                <td>{preview.detailSections[2]?.items[2]?.[1] ?? "-"}</td>
+              </tr>
+            </tbody>
+          </table>
+        </div>
+      </section>
     </>
   );
+}
+
+function CountList({
+  heading,
+  items,
+}: {
+  heading: string;
+  items: Array<{ key: string; label: string; count: number; unit?: string }>;
+}) {
+  return (
+    <section aria-labelledby={`${heading}-heading`}>
+      <h3 id={`${heading}-heading`}>{heading}</h3>
+      <ul>
+        {items.map((item) => (
+          <li key={item.key}>
+            {item.label}: {item.count.toLocaleString()}
+            {item.unit ?? ""}
+          </li>
+        ))}
+      </ul>
+    </section>
+  );
+}
+
+function DetailList({ heading, items }: { heading: string; items: Array<[string, string]> }) {
+  return (
+    <section aria-labelledby={`${heading}-heading`}>
+      <h3 id={`${heading}-heading`}>{heading}</h3>
+      <dl>
+        {items.map(([label, value]) => (
+          <div key={label}>
+            <dt className="muted">{label}</dt>
+            <dd>{value}</dd>
+          </div>
+        ))}
+      </dl>
+    </section>
+  );
+}
+
+function statusLabel(status: string | undefined): string {
+  switch (status) {
+    case "ready":
+      return "問題なし";
+    case "attention":
+      return "要確認";
+    case "blocked":
+      return "保留";
+    case "suppressed":
+      return "非表示";
+    case "warning":
+      return "注意";
+    default:
+      return status || "-";
+  }
 }

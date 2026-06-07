@@ -66,7 +66,6 @@ fn handle_client(mut stream: TcpStream, server: &LocalServer, ui_root: &Path) ->
     let mut request_parts = request.first_line.split_whitespace();
     let method = request_parts.next().unwrap_or("");
     let path = request_parts.next().unwrap_or("/");
-    let path = path.split('?').next().unwrap_or(path);
 
     let response = response_for_request(method, path, &request, server, ui_root);
     write_response(&mut stream, response)
